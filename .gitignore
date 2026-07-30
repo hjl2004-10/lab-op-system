@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+.venv/
+.venv-win/
+data/
+*.db
+__pycache__/
+*.py[cod]
+.artifacts/
