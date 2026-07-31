@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   Star,
   Lock,
@@ -11,11 +11,12 @@ import {
   Send,
 } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Tabs,
   TabsList,
@@ -94,8 +95,8 @@ export default function TaskEditDialog({
   onSetRating,
 }: TaskEditDialogProps) {
   const [activeTab, setActiveTab] = useState("basic");
-  const [form, setForm] = useState<Partial<Task>>({});
-  const [progressInput, setProgressInput] = useState<number[]>([0]);
+  const [form, setForm] = useState<Partial<Task>>(() => task ? { ...task } : {});
+  const [progressInput, setProgressInput] = useState<number[]>(() => [task?.progress ?? 0]);
 
   // Progress record form state
   const [newProgress, setNewProgress] = useState("");
@@ -112,24 +113,6 @@ export default function TaskEditDialog({
   // 100% progress confirmation dialog
   const [showProgressConfirm, setShowProgressConfirm] = useState(false);
   const [pendingProgressValue, setPendingProgressValue] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (task) {
-      setForm({ ...task });
-      setProgressInput([task.progress]);
-    } else {
-      setForm({});
-      setProgressInput([0]);
-    }
-    setNewProgress("");
-    setNewProblems("");
-    setNewSolutions("");
-    setHoveredStar(0);
-    setReplyContents({});
-    setExpandedReplyForms({});
-    setShowProgressConfirm(false);
-    setPendingProgressValue(null);
-  }, [task]);
 
   const assignee = useMemo(
     () => people.find((p) => p.id === task?.assigneeId),
@@ -241,7 +224,7 @@ export default function TaskEditDialog({
   };
 
   // Can current user reply to a record?
-  const userCanReply = (_recordAuthorId: string) => {
+  const userCanReply = () => {
     if (isAdmin) return true;
     // Students can reply to records on their own tasks
     return currentUserId === task?.assigneeId;
@@ -250,19 +233,29 @@ export default function TaskEditDialog({
   if (!task) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-full max-w-none gap-0 overflow-y-auto p-0 sm:w-[600px] sm:max-w-[calc(100vw-2rem)]"
+      >
+        <SheetHeader className="border-b border-slate-200 px-5 py-4 pr-12 dark:border-slate-700">
+          <SheetTitle className="flex items-center gap-2">
             <CircleDot
               className="w-4 h-4 shrink-0"
               style={{ color: assignee?.color ?? "#94a3b8" }}
             />
             <span className="truncate">{task.name}</span>
-          </DialogTitle>
-        </DialogHeader>
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            编辑任务基本信息、进展记录和评分
+          </SheetDescription>
+        </SheetHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="px-4 py-4 sm:px-5"
+        >
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="basic">基本信息</TabsTrigger>
             <TabsTrigger value="progress">进展与问题</TabsTrigger>
@@ -293,7 +286,7 @@ export default function TaskEditDialog({
               {/* Assignee */}
               <div className="space-y-1.5">
                 <Label className="text-xs text-slate-500">负责人</Label>
-                {canEditBasic ? (
+                {isAdmin ? (
                   <Select
                     value={form.assigneeId ?? task.assigneeId}
                     onValueChange={(value) =>
@@ -548,7 +541,7 @@ export default function TaskEditDialog({
                     )}
 
                     {/* Reply button */}
-                    {userCanReply(record.authorId) && (
+                    {userCanReply() && (
                       <div>
                         <Button
                           variant="ghost"
@@ -694,7 +687,7 @@ export default function TaskEditDialog({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from "react";
-import { GripVertical, Trash2 } from "lucide-react";
+import { useState, useRef, useCallback, forwardRef } from "react";
+import { GripVertical } from "lucide-react";
 import type { Task, Person } from "@/types";
 import { formatDateRange } from "@/utils";
 import { cn } from "@/lib/utils";
@@ -7,22 +7,18 @@ import { cn } from "@/lib/utils";
 interface TaskListProps {
   tasks: Task[];
   people: Person[];
-  currentUserId: string | null;
-  isAdmin: boolean;
   onTaskClick: (task: Task) => void;
   onReorder: (taskIds: string[]) => void;
-  onDeleteTask: (taskId: string) => void;
+  onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
 }
 
-export default function TaskList({
+const TaskList = forwardRef<HTMLDivElement, TaskListProps>(function TaskList({
   tasks,
   people,
-  currentUserId,
-  isAdmin,
   onTaskClick,
   onReorder,
-  onDeleteTask,
-}: TaskListProps) {
+  onScroll,
+}, ref) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragOverIndexRef = useRef<number>(-1);
@@ -30,11 +26,6 @@ export default function TaskList({
   const getPerson = useCallback(
     (assigneeId: string) => people.find((p) => p.id === assigneeId),
     [people]
-  );
-
-  const canEditTask = useCallback(
-    (task: Task) => isAdmin || currentUserId === task.assigneeId,
-    [isAdmin, currentUserId]
   );
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, task: Task) => {
@@ -105,14 +96,8 @@ export default function TaskList({
     return "text-slate-400";
   };
 
-  const handleDeleteTask = (task: Task) => {
-    if (window.confirm("确定要删除此任务吗？")) {
-      onDeleteTask(task.id);
-    }
-  };
-
   return (
-    <div className="w-64 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0 flex flex-col">
+    <div className="h-full min-w-0 bg-white dark:bg-slate-800 flex flex-col">
       {/* Header */}
       <div className="h-[48px] px-4 flex items-center border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 shrink-0">
         <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -124,13 +109,12 @@ export default function TaskList({
       </div>
 
       {/* Task rows */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={ref} className="flex-1 overflow-y-auto" onScroll={onScroll}>
         {tasks.map((task, index) => {
           const person = getPerson(task.assigneeId);
           const isDragging = draggingId === task.id;
           const isDragOver = dragOverId === task.id;
-          const editable = canEditTask(task);
-          const isCompleted = task.progress >= 100;
+            const isCompleted = task.progress >= 100;
 
           return (
             <div
@@ -190,31 +174,14 @@ export default function TaskList({
                   </span>
                 </div>
               </div>
-
-              {/* Delete button - only visible when editable */}
-              {editable && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteTask(task);
-                  }}
-                  className={cn(
-                    "shrink-0 p-1 rounded",
-                    "text-slate-400 dark:text-slate-500",
-                    "hover:text-red-500 dark:hover:text-red-400",
-                    "hover:bg-red-50 dark:hover:bg-red-900/20",
-                    "opacity-0 group-hover:opacity-100",
-                    "transition-opacity"
-                  )}
-                  title="删除任务"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
             </div>
           );
         })}
       </div>
     </div>
   );
-}
+});
+
+TaskList.displayName = "TaskList";
+
+export default TaskList;

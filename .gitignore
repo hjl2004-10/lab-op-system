@@ -8,3 +8,9 @@ data/
 __pycache__/
 *.py[cod]
 .artifacts/
+
+# Local agent and browser artifacts
+.playwright-mcp/
+.zcode/
+gui-audit/
+gui-test-screenshots/

@@ -1,4 +1,10 @@
-import { useMemo, forwardRef } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  forwardRef,
+} from "react";
 import {
   differenceInDays,
   addDays,
@@ -22,6 +28,13 @@ interface TimelineProps {
   viewMode: "day" | "week" | "month";
   holidays: Record<string, string>;
   onTaskClick: (task: Task) => void;
+  onVerticalScroll?: (scrollTop: number) => void;
+}
+
+export interface TimelineHandle {
+  scrollToToday: () => void;
+  scrollByPage: (direction: -1 | 1) => void;
+  setScrollTop: (scrollTop: number) => void;
 }
 
 interface DayCell {
@@ -206,8 +219,9 @@ function getTaskOffset(
 // Component
 // ============================================================
 
-const Timeline = forwardRef<HTMLDivElement, TimelineProps>(
-  ({ tasks, people, viewMode, holidays, onTaskClick }, ref) => {
+const Timeline = forwardRef<TimelineHandle, TimelineProps>(
+  ({ tasks, people, viewMode, holidays, onTaskClick, onVerticalScroll }, ref) => {
+    const scrollRef = useRef<HTMLDivElement>(null);
     const dayWidth = getDayWidth(viewMode);
 
     const { rangeStart, dayCells, columns, todayOffset, totalWidth } = useMemo(() => {
@@ -254,9 +268,36 @@ const Timeline = forwardRef<HTMLDivElement, TimelineProps>(
       };
     }, [tasks, viewMode, holidays, dayWidth]);
 
+    useImperativeHandle(ref, () => ({
+      scrollToToday: () => {
+        const container = scrollRef.current;
+        if (!container) return;
+        const target = todayOffset === null ? 0 : Math.max(0, todayOffset - container.clientWidth / 2);
+        container.scrollTo({ left: target, behavior: "smooth" });
+      },
+      scrollByPage: (direction) => {
+        const container = scrollRef.current;
+        if (!container) return;
+        container.scrollBy({ left: direction * container.clientWidth * 0.8, behavior: "smooth" });
+      },
+      setScrollTop: (scrollTop) => {
+        const container = scrollRef.current;
+        if (container && container.scrollTop !== scrollTop) {
+          container.scrollTop = scrollTop;
+        }
+      },
+    }), [todayOffset]);
+
+    useEffect(() => {
+      const container = scrollRef.current;
+      if (!container || todayOffset === null) return;
+      const target = Math.max(0, todayOffset - container.clientWidth / 2);
+      container.scrollLeft = target;
+    }, [todayOffset, viewMode]);
+
     if (tasks.length === 0) {
       return (
-        <div className="flex-1 relative overflow-x-auto overflow-y-hidden min-h-[400px] flex items-center justify-center bg-white dark:bg-slate-800">
+        <div ref={scrollRef} className="h-full flex-1 relative overflow-auto min-h-[320px] flex items-center justify-center bg-white dark:bg-slate-800">
           <span className="text-sm text-slate-400 dark:text-slate-500">
             暂无任务
           </span>
@@ -266,8 +307,9 @@ const Timeline = forwardRef<HTMLDivElement, TimelineProps>(
 
     return (
       <div
-        ref={ref}
-        className="flex-1 relative overflow-x-auto overflow-y-auto bg-white dark:bg-slate-800"
+        ref={scrollRef}
+        className="h-full flex-1 relative overflow-auto bg-white dark:bg-slate-800"
+        onScroll={(event) => onVerticalScroll?.(event.currentTarget.scrollTop)}
       >
         <div style={{ minWidth: totalWidth }}>
           {/* ---- Header ---- */}

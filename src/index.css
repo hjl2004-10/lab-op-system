@@ -10,7 +10,7 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
+    --primary: 158 46% 24%;
     --primary-foreground: 0 0% 98%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
@@ -24,14 +24,14 @@
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
     --radius: 0.625rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 150 17% 97%;
+    --sidebar-foreground: 158 20% 22%;
+    --sidebar-primary: 158 46% 24%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 153 24% 92%;
+    --sidebar-accent-foreground: 158 46% 22%;
+    --sidebar-border: 150 13% 88%;
+    --sidebar-ring: 158 38% 42%;
   }
 
   .dark {
@@ -41,8 +41,8 @@
     --card-foreground: 0 0% 98%;
     --popover: 240 10% 3.9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
+    --primary: 152 32% 72%;
+    --primary-foreground: 156 38% 13%;
     --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
     --muted: 240 3.7% 15.9%;
@@ -374,4 +374,270 @@
   .account-security { margin-left: 0; align-items: flex-end; }
   .account-password { grid-template-columns: 20px 1fr; }
   .account-password button { grid-column: 2; }
+}
+
+/* Workspace */
+.workspace-shell {
+  min-height: 100vh;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  overflow: hidden;
+  background: #f5f7f6;
+}
+.dark .workspace-shell { background: #0c120f; }
+
+.workspace-sidebar {
+  min-width: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: hsl(var(--sidebar-foreground));
+  background: hsl(var(--sidebar-background));
+  border-right: 1px solid hsl(var(--sidebar-border));
+  transition: width .18s ease;
+}
+.workspace-brand {
+  height: 64px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid hsl(var(--sidebar-border));
+}
+.workspace-brand-mark {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #23604f;
+}
+.workspace-brand-copy { min-width: 0; display: flex; flex-direction: column; }
+.workspace-brand-copy strong { font: 600 13px Georgia, serif; color: #1b3029; white-space: nowrap; }
+.workspace-brand-copy span { margin-top: 2px; color: #7a8983; font-size: 10px; white-space: nowrap; }
+.workspace-nav { padding: 14px 10px; display: flex; flex: 1; flex-direction: column; gap: 4px; }
+.workspace-nav-item {
+  height: 40px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-radius: 6px;
+  color: #556761;
+  font-size: 13px;
+  text-decoration: none;
+  transition: background .15s, color .15s;
+}
+.workspace-nav-item:hover { color: #1f5748; background: #edf3f0; }
+.workspace-nav-item.active { color: #174f40; background: #e2eee9; box-shadow: inset 3px 0 #246b57; font-weight: 600; }
+.workspace-nav-item svg { flex: 0 0 auto; }
+.workspace-sidebar-toggle {
+  height: 46px;
+  margin: 0 10px 12px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid hsl(var(--sidebar-border));
+  color: #74847e;
+  background: transparent;
+  font: 12px inherit;
+  cursor: pointer;
+}
+.workspace-sidebar-toggle:hover { color: #1f5748; background: #edf3f0; }
+.dark .workspace-brand-copy strong { color: #f4f5ef; }
+.dark .workspace-brand-copy span { color: #a8b8b2; }
+.dark .workspace-nav-item { color: #b7c4bf; }
+.dark .workspace-nav-item:hover { color: #f4f7f5; background: rgba(255,255,255,.07); }
+.dark .workspace-nav-item.active { color: #d9eee6; background: rgba(87,151,129,.2); box-shadow: inset 3px 0 #72aa97; }
+.dark .workspace-sidebar-toggle { color: #9dafaa; }
+.dark .workspace-sidebar-toggle:hover { color: #fff; background: rgba(255,255,255,.06); }
+.workspace-mobile-close, .workspace-menu-button, .workspace-mobile-nav { display: none; }
+
+.workspace-shell.sidebar-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+.sidebar-collapsed .workspace-brand { padding: 0 16px; }
+.sidebar-collapsed .workspace-brand-copy,
+.sidebar-collapsed .workspace-nav-item span,
+.sidebar-collapsed .workspace-sidebar-toggle span { display: none; }
+.sidebar-collapsed .workspace-nav-item { padding: 0; justify-content: center; }
+.sidebar-collapsed .workspace-sidebar-toggle { padding: 0; justify-content: center; }
+
+.workspace-stage { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.workspace-topbar {
+  height: 56px;
+  padding: 0 20px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #dde4e0;
+  background: rgba(255,255,255,.95);
+}
+.dark .workspace-topbar { border-color: #27322d; background: #111914; }
+.workspace-topbar-title { display: flex; align-items: center; gap: 8px; }
+.workspace-topbar h1 { margin: 0; color: #1c2c27; font-size: 14px; font-weight: 600; }
+.dark .workspace-topbar h1 { color: #eaf0ed; }
+.workspace-account { display: flex; align-items: center; gap: 14px; }
+.workspace-save-state { display: flex; align-items: center; gap: 5px; color: #6f7f79; font-size: 11px; }
+.workspace-save-state.saving { color: #9b6b2e; }
+.workspace-save-state.error { color: #ad453f; }
+.workspace-user-trigger {
+  height: 38px;
+  padding: 0 4px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-left: 1px solid #dde4e0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.dark .workspace-user-trigger { border-color: #2b3731; }
+.workspace-user-avatar {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #26624f;
+  font-size: 12px;
+}
+.workspace-user-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.workspace-user-copy strong { max-width: 100px; overflow: hidden; text-overflow: ellipsis; font-size: 12px; white-space: nowrap; }
+.workspace-user-copy small { color: #87938f; font-size: 10px; }
+.workspace-content { min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+.workspace-content > main { height: 100%; overflow: auto; }
+.workspace-section-loader { min-height: 100%; }
+
+.schedule-page { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.schedule-heading {
+  min-height: 84px;
+  padding: 16px 22px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: #fff;
+}
+.dark .schedule-heading { background: #111914; }
+.schedule-heading h2 { margin: 0 0 5px; color: #1b2d27; font-size: 21px; line-height: 1.2; }
+.dark .schedule-heading h2 { color: #eff4f1; }
+.schedule-heading p { margin: 0; display: flex; gap: 7px; align-items: center; color: #77847f; font-size: 12px; }
+.schedule-heading p strong { color: #304a41; font-weight: 600; }
+.dark .schedule-heading p strong { color: #c9d8d1; }
+.schedule-heading p small { color: #98a29e; }
+.workspace-primary-action { color: #fff; background: #22604e; }
+.workspace-primary-action:hover { background: #194b3d; }
+
+.schedule-filters {
+  min-height: 54px;
+  padding: 10px 22px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid #e4e9e6;
+  border-bottom: 1px solid #dbe2de;
+  background: #fff;
+}
+.dark .schedule-filters { border-color: #29342f; background: #111914; }
+.schedule-search { position: relative; width: min(360px, 34vw); }
+.schedule-search > svg { position: absolute; z-index: 1; top: 10px; left: 10px; color: #8a9792; }
+.schedule-search input { width: 100%; height: 36px; padding-left: 34px; padding-right: 32px; background: #f8faf9; }
+.schedule-search button { position: absolute; top: 6px; right: 5px; width: 24px; height: 24px; display: grid; place-items: center; border: 0; color: #87938f; background: transparent; cursor: pointer; }
+.schedule-filter-field { display: flex; align-items: center; gap: 7px; }
+.schedule-filter-field > span { color: #73817c; font-size: 11px; }
+.schedule-filter-field button { min-width: 112px; height: 36px; background: #fff; }
+.dark .schedule-filter-field button { background: #131c18; }
+.schedule-clear-filters { margin-left: auto; color: #6f7e79; }
+
+.gantt-workspace { min-height: 0; flex: 1; display: flex; flex-direction: column; background: #fff; }
+.dark .gantt-workspace { background: #101713; }
+.gantt-toolbar {
+  min-height: 48px;
+  padding: 7px 12px 7px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #dce3df;
+  background: #f8faf9;
+}
+.dark .gantt-toolbar { border-color: #29342f; background: #121a16; }
+.gantt-navigation, .gantt-toolbar-actions { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.gantt-date-range { margin-left: 5px; overflow: hidden; text-overflow: ellipsis; color: #75837e; font-size: 11px; white-space: nowrap; }
+.gantt-zoom, .gantt-mobile-switch { display: flex; overflow: hidden; border: 1px solid #d8e0dc; border-radius: 6px; }
+.dark .gantt-zoom, .dark .gantt-mobile-switch { border-color: #34413b; }
+.gantt-zoom button, .gantt-mobile-switch button { height: 30px; padding: 0 12px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-right: 1px solid #d8e0dc; color: #687771; background: #fff; font: 11px inherit; cursor: pointer; }
+.gantt-zoom button:last-child, .gantt-mobile-switch button:last-child { border-right: 0; }
+.dark .gantt-zoom button, .dark .gantt-mobile-switch button { border-color: #34413b; color: #b8c5bf; background: #111914; }
+.gantt-zoom button.active, .gantt-mobile-switch button.active { color: #fff; background: #245b4c; }
+.gantt-viewport { min-width: 0; min-height: 0; flex: 1; display: flex; overflow: hidden; background: #fff; }
+.dark .gantt-viewport { background: #101713; }
+.gantt-task-pane { min-width: 240px; max-width: 440px; height: 100%; flex: 0 0 auto; overflow: hidden; border-right: 1px solid #dce3df; }
+.dark .gantt-task-pane { border-color: #29342f; }
+.gantt-timeline-pane { min-width: 0; height: 100%; flex: 1; overflow: hidden; }
+.gantt-resize-handle { position: relative; z-index: 5; width: 5px; flex: 0 0 auto; border: 0; background: transparent; cursor: col-resize; }
+.gantt-resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; background: #dce3df; }
+.gantt-resize-handle:hover::after { width: 2px; left: 1px; background: #4b8a77; }
+
+.workspace-page { height: 100%; padding: 22px; overflow: auto; }
+.workspace-page-heading { margin-bottom: 18px; }
+.workspace-page-heading h2 { margin: 0 0 5px; color: #1b2d27; font-size: 21px; }
+.dark .workspace-page-heading h2 { color: #eef4f1; }
+.workspace-page-heading p { margin: 0; color: #7c8984; font-size: 12px; }
+
+@media (max-width: 1024px) {
+  .workspace-shell { grid-template-columns: 64px minmax(0, 1fr); }
+  .workspace-brand { padding: 0 16px; }
+  .workspace-brand-copy, .workspace-nav-item span, .workspace-sidebar-toggle span { display: none; }
+  .workspace-nav-item, .workspace-sidebar-toggle { padding: 0; justify-content: center; }
+  .schedule-heading { min-height: 74px; }
+}
+
+@media (max-width: 767px) {
+  .workspace-shell, .workspace-shell.sidebar-collapsed { display: block; height: 100dvh; }
+  .workspace-sidebar { display: none; }
+  .workspace-mobile-nav { position: fixed; z-index: 70; inset: 0; display: block; }
+  .workspace-mobile-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(7,20,15,.48); }
+  .workspace-mobile-nav > aside { position: relative; z-index: 1; width: min(280px, 84vw); height: 100%; display: flex; flex-direction: column; color: hsl(var(--sidebar-foreground)); background: hsl(var(--sidebar-background)); }
+  .workspace-mobile-nav .workspace-brand-copy, .workspace-mobile-nav .workspace-nav-item span, .workspace-mobile-nav .workspace-sidebar-toggle span { display: flex; }
+  .workspace-mobile-nav .workspace-nav-item { padding: 0 12px; justify-content: flex-start; }
+  .workspace-mobile-nav .workspace-sidebar-toggle { display: none; }
+  .workspace-mobile-close { display: inline-flex; margin-left: auto; color: #385c50; }
+  .dark .workspace-mobile-close { color: #d4dfda; }
+  .workspace-menu-button { display: inline-flex; }
+  .workspace-topbar { height: 54px; padding: 0 12px; }
+  .workspace-topbar h1 { font-size: 13px; }
+  .workspace-save-state { display: none; }
+  .workspace-user-copy { display: none; }
+  .workspace-user-trigger { border-left: 0; }
+  .workspace-content { height: calc(100dvh - 54px); }
+  .schedule-heading { min-height: 68px; padding: 12px 14px; }
+  .schedule-heading h2 { font-size: 18px; }
+  .schedule-heading p { max-width: 240px; flex-wrap: wrap; gap: 4px; line-height: 1.4; }
+  .workspace-primary-action { width: 36px; height: 36px; padding: 0; }
+  .workspace-primary-action svg { margin: 0; }
+  .workspace-primary-action { font-size: 0; }
+  .schedule-filters { min-height: auto; padding: 9px 14px; display: grid; grid-template-columns: minmax(0, 1fr) 118px; gap: 8px; }
+  .schedule-search { width: 100%; grid-column: 1 / -1; }
+  .schedule-filter-field { min-width: 0; }
+  .schedule-filter-field > span { display: none; }
+  .schedule-filter-field button { width: 100%; min-width: 0; }
+  .schedule-clear-filters { width: auto; margin: 0; }
+  .gantt-toolbar { min-height: 86px; padding: 7px 10px; align-items: stretch; flex-direction: column; }
+  .gantt-navigation, .gantt-toolbar-actions { width: 100%; }
+  .gantt-date-range { flex: 1; text-align: right; }
+  .gantt-toolbar-actions { justify-content: space-between; }
+  .gantt-mobile-switch { flex: 1; }
+  .gantt-mobile-switch button { flex: 1; }
+  .gantt-viewport { min-height: 0; }
+  .gantt-task-pane { width: 100% !important; min-width: 0; max-width: none; border-right: 0; }
+  .gantt-timeline-pane { width: 100%; flex: 1; }
+  .schedule-page { height: 100%; }
+  .workspace-page { padding: 14px; }
 }

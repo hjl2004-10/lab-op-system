@@ -176,8 +176,7 @@ export function importSyncData(
   code: string,
   currentPeople: Person[],
   currentTasks: Task[],
-  currentProfiles: StudentProfile[] = [],
-  _currentUserId?: string | null
+  currentProfiles: StudentProfile[] = []
 ): { people: Person[]; tasks: Task[]; profiles: StudentProfile[] } {
   const syncData = decodeSyncData(code);
   if (!syncData) {
@@ -190,7 +189,7 @@ export function importSyncData(
   const incomingProfiles = syncData.studentProfiles ?? [];
 
   // Merge people: update/add only relevant people
-  let mergedPeople = [...currentPeople];
+  const mergedPeople = [...currentPeople];
   for (const incoming of incomingPeople) {
     const idx = mergedPeople.findIndex(p => p.id === incoming.id);
     if (idx >= 0) {
@@ -201,7 +200,7 @@ export function importSyncData(
   }
 
   // Merge tasks with incremental logic
-  let mergedTasks = [...currentTasks];
+  const mergedTasks = [...currentTasks];
   for (const incoming of incomingTasks) {
     const idx = mergedTasks.findIndex(t => t.id === incoming.id);
     if (idx >= 0) {
@@ -243,7 +242,7 @@ export function importSyncData(
   }
 
   // Merge profiles
-  let mergedProfiles: StudentProfile[] = currentProfiles.length > 0
+  const mergedProfiles: StudentProfile[] = currentProfiles.length > 0
     ? currentProfiles.map(p => ({ ...p }))
     : mergedPeople.filter(p => p.role === "member").map(p => ({
         personId: p.id,

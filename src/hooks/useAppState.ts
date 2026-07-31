@@ -46,13 +46,10 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   useEffect(() => {
     if (!authUser) {
       hydratedRef.current = false;
-      setLoading(false);
       return;
     }
 
     let active = true;
-    setLoading(true);
-    setLoadError("");
     hydratedRef.current = false;
 
     const applyState = (state: RemoteState) => {
@@ -93,12 +90,11 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
 
   useEffect(() => {
     if (!authUser || !hydratedRef.current || loadError || !autoSave) {
-      if (!autoSave) setSyncStatus("idle");
       return;
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    setSyncStatus("saving");
     saveTimerRef.current = setTimeout(() => {
+      setSyncStatus("saving");
       api.saveState({ people, tasks, studentProfiles })
         .then(() => setSyncStatus("saved"))
         .catch((error) => {
@@ -126,7 +122,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     [people, currentUserId]
   );
 
-  const isAdmin = useMemo(() => currentUser?.role === "admin", [currentUser]);
+  const isAdmin = authUser?.role === "admin";
 
   const filteredTasks = useMemo(() => {
     let result = [...tasks];
@@ -206,25 +202,24 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
 
   const reorderTasks = useCallback(
     (taskIds: string[]) => {
-      setTasks((prev) => {
-        const taskMap = new Map(prev.map((t) => [t.id, t]));
-        const reordered: Task[] = [];
-        taskIds.forEach((id, i) => {
-          const t = taskMap.get(id);
-          if (t) {
-            reordered.push({ ...t, order: i });
-          }
+      setTasks((previous) => {
+        const visibleIds = new Set(taskIds);
+        const visibleTasks = new Map(
+          taskIds
+            .map((id) => previous.find((task) => task.id === id))
+            .filter((task): task is Task => Boolean(task))
+            .map((task) => [task.id, task])
+        );
+        let visibleIndex = 0;
+        return previous.map((task) => {
+          if (!visibleIds.has(task.id)) return task;
+          const replacement = visibleTasks.get(taskIds[visibleIndex]);
+          visibleIndex += 1;
+          return replacement ? { ...replacement, order: task.order } : task;
         });
-        // Append any tasks not in the new order
-        prev.forEach((t) => {
-          if (!taskIds.includes(t.id)) {
-            reordered.push(t);
-          }
-        });
-        return reordered;
       });
     },
-    [setTasks]
+    []
   );
 
   const addProgressRecord = useCallback(
@@ -661,7 +656,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
       setPeople(updatedPeople);
 
       // Merge tasks from sync code - reassign tasks that belong to the sync sender to this new person
-      let mergedTasks = [...tasks];
+      const mergedTasks = [...tasks];
       const incomingTasks = syncData.tasks || [];
       for (const incoming of incomingTasks) {
         const idx = mergedTasks.findIndex(t => t.id === incoming.id);

@@ -48,6 +48,13 @@ interface SyncPayload {
 // Helpers
 // ------------------------------------------------------------------
 
+function toPublicProfile(profile: StudentProfile): StudentProfile {
+  return {
+    ...profile,
+    adminOnlyData: { fields: [], values: {}, note: "" },
+  };
+}
+
 function createMemberPayload(
   people: Person[],
   tasks: Task[],
@@ -62,7 +69,9 @@ function createMemberPayload(
     fromPersonName: myPerson?.name || "",
     people: people.filter((p) => p.id === myId),
     tasks: tasks.filter((t) => t.assigneeId === myId),
-    studentProfiles: studentProfiles.filter((sp) => sp.personId === myId),
+    studentProfiles: studentProfiles
+      .filter((profile) => profile.personId === myId)
+      .map(toPublicProfile),
   };
 }
 
@@ -79,7 +88,9 @@ function createAdminPayloadForStudent(
     fromPersonName: "杨老师",
     people: people.filter((p) => p.id === studentId),
     tasks: tasks.filter((t) => t.assigneeId === studentId),
-    studentProfiles: studentProfiles.filter((sp) => sp.personId === studentId),
+    studentProfiles: studentProfiles
+      .filter((profile) => profile.personId === studentId)
+      .map(toPublicProfile),
   };
 }
 
@@ -100,11 +111,11 @@ function createAdminFullPayload(
   };
 }
 
-export function encodeSyncCode(payload: SyncPayload): string {
+function encodeSyncCode(payload: SyncPayload): string {
   return btoa(encodeURIComponent(JSON.stringify(payload)));
 }
 
-export function decodeSyncCode(code: string): SyncPayload | null {
+function decodeSyncCode(code: string): SyncPayload | null {
   try {
     // Remove all whitespace (spaces, newlines, tabs)
     const cleanCode = code.replace(/\s/g, "");
