@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -7,8 +7,7 @@ import {
   PanelRight,
   RotateCcw,
 } from "lucide-react";
-import TaskList from "@/components/TaskList";
-import Timeline, { type TimelineHandle } from "@/components/Timeline";
+import GanttBoard, { type GanttBoardHandle } from "@/components/workspace/GanttBoard";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -38,9 +37,7 @@ export default function GanttWorkspace({
   const isMobile = useIsMobile();
   const [mobileView, setMobileView] = useState<"tasks" | "timeline">("tasks");
   const [listWidth, setListWidth] = useState(300);
-  const taskScrollRef = useRef<HTMLDivElement>(null);
-  const timelineRef = useRef<TimelineHandle>(null);
-  const syncingRef = useRef(false);
+  const boardRef = useRef<GanttBoardHandle>(null);
 
   const dateRange = useMemo(() => {
     if (tasks.length === 0) return "暂无排期";
@@ -48,27 +45,6 @@ export default function GanttWorkspace({
     const ends = tasks.map((task) => task.endDate).sort();
     return `${starts[0]} 至 ${ends[ends.length - 1]}`;
   }, [tasks]);
-
-  const syncFromTasks = useCallback(
-    (event: React.UIEvent<HTMLDivElement>) => {
-      if (syncingRef.current) return;
-      syncingRef.current = true;
-      timelineRef.current?.setScrollTop(event.currentTarget.scrollTop);
-      requestAnimationFrame(() => {
-        syncingRef.current = false;
-      });
-    },
-    []
-  );
-
-  const syncFromTimeline = useCallback((scrollTop: number) => {
-    if (syncingRef.current) return;
-    syncingRef.current = true;
-    if (taskScrollRef.current) taskScrollRef.current.scrollTop = scrollTop;
-    requestAnimationFrame(() => {
-      syncingRef.current = false;
-    });
-  }, []);
 
   const startResize = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -94,7 +70,7 @@ export default function GanttWorkspace({
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={() => timelineRef.current?.scrollByPage(-1)}
+            onClick={() => boardRef.current?.scrollByPage(-1)}
             title="上一时间段"
             aria-label="上一时间段"
           >
@@ -103,14 +79,14 @@ export default function GanttWorkspace({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => timelineRef.current?.scrollToToday()}
+            onClick={() => boardRef.current?.scrollToToday()}
           >
             今天
           </Button>
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={() => timelineRef.current?.scrollByPage(1)}
+            onClick={() => boardRef.current?.scrollByPage(1)}
             title="下一时间段"
             aria-label="下一时间段"
           >
@@ -171,44 +147,19 @@ export default function GanttWorkspace({
       </div>
 
       <div id="gantt-chart" className="gantt-viewport">
-        {(!isMobile || mobileView === "tasks") && (
-          <div
-            className="gantt-task-pane"
-            style={isMobile ? undefined : { width: listWidth }}
-          >
-            <TaskList
-              ref={taskScrollRef}
-              tasks={tasks}
-              people={people}
-              onTaskClick={onTaskClick}
-              onReorder={onReorder}
-              onScroll={syncFromTasks}
-            />
-          </div>
-        )}
-
-        {!isMobile && (
-          <button
-            className="gantt-resize-handle"
-            onPointerDown={startResize}
-            aria-label="调整任务列表宽度"
-            title="拖动调整任务列表宽度"
-          />
-        )}
-
-        {(!isMobile || mobileView === "timeline") && (
-          <div className="gantt-timeline-pane">
-            <Timeline
-              ref={timelineRef}
-              tasks={tasks}
-              people={people}
-              viewMode={viewMode}
-              holidays={holidays}
-              onTaskClick={onTaskClick}
-              onVerticalScroll={syncFromTimeline}
-            />
-          </div>
-        )}
+        <GanttBoard
+          ref={boardRef}
+          tasks={tasks}
+          people={people}
+          viewMode={viewMode}
+          holidays={holidays}
+          listWidth={listWidth}
+          showTaskColumn={!isMobile || mobileView === "tasks"}
+          showTimeline={!isMobile || mobileView === "timeline"}
+          onTaskClick={onTaskClick}
+          onReorder={onReorder}
+          onResizeStart={!isMobile ? startResize : undefined}
+        />
       </div>
     </section>
   );
