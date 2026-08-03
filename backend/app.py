@@ -223,6 +223,7 @@ class StatePayload(BaseModel):
     people: list[dict[str, Any]]
     tasks: list[dict[str, Any]]
     studentProfiles: list[dict[str, Any]] = Field(default_factory=list)
+    profileFieldDefs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def public_user(row: sqlite3.Row) -> dict[str, Any]:
@@ -245,6 +246,7 @@ def sanitize_state(payload: dict[str, Any]) -> dict[str, Any]:
         "people": [sanitize_person(person) for person in payload.get("people", [])],
         "tasks": payload.get("tasks", []),
         "studentProfiles": payload.get("studentProfiles", []),
+        "profileFieldDefs": payload.get("profileFieldDefs", []),
     }
 
 
@@ -273,6 +275,8 @@ def state_for_user(payload: dict[str, Any], user: dict[str, Any]) -> dict[str, A
         "people": visible_people,
         "tasks": [task for task in clean["tasks"] if task.get("assigneeId") == person_id],
         "studentProfiles": profiles,
+        # 预设字段对所有角色可见（学生填档案需要用到可选项）
+        "profileFieldDefs": clean["profileFieldDefs"],
     }
 
 
@@ -315,6 +319,8 @@ def merge_member_state(
         "people": stored.get("people", []),
         "tasks": tasks,
         "studentProfiles": profiles,
+        # 忽略学生传入的预设字段，永远保留服务端定义，防止学生篡改
+        "profileFieldDefs": stored.get("profileFieldDefs", []),
     }
 
 

@@ -555,6 +555,118 @@
 .dark .schedule-filter-field button { background: #131c18; }
 .schedule-clear-filters { margin-left: auto; color: #6f7e79; }
 
+/* 学生专属卡片（主页，管理员勾选学生） */
+.student-cards {
+  padding: 12px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-bottom: 1px solid #dbe2de;
+  background: #fff;
+}
+.dark .student-cards { border-bottom-color: #29342f; background: #111914; }
+.student-cards-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.student-cards-title { font-size: 13px; font-weight: 500; color: #304a41; }
+.dark .student-cards-title { color: #c9d8d1; }
+.student-cards-count { font-size: 12px; color: #98a29e; }
+.student-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.student-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #dce3df;
+  border-radius: 8px;
+  background: #fff;
+  color: #40524b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.student-card:hover { border-color: #b9c6c0; }
+.dark .student-card { border-color: #2a3631; background: #131c18; color: #cfdbd5; }
+.dark .student-card:hover { border-color: #3a4a43; }
+.student-card-checked {
+  border-color: #34d399;
+  background: #ecfdf5;
+}
+.dark .student-card-checked { border-color: #10b981; background: #0d2a1e; }
+.student-card-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.student-card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.student-card-count { color: #98a29e; font-size: 12px; }
+
+/* 成员多选下拉（管理员按学生查看任务） */
+.schedule-member-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #dce3df;
+  border-radius: 6px;
+  color: #33463f;
+  font-size: 13px;
+  cursor: pointer;
+}
+.dark .schedule-member-trigger { border-color: #2a3631; color: #dfe9e4; }
+.schedule-member-popover { width: 236px; padding: 8px; }
+.schedule-member-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid #eef1f0;
+}
+.dark .schedule-member-header { border-bottom-color: #26312c; }
+.schedule-member-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #33463f;
+  cursor: pointer;
+}
+.dark .schedule-member-all { color: #dfe9e4; }
+.schedule-member-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-top: 6px;
+}
+.schedule-member-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #40524b;
+  cursor: pointer;
+}
+.schedule-member-row:hover { background: #f3f6f4; }
+.dark .schedule-member-row { color: #cfdbd5; }
+.dark .schedule-member-row:hover { background: #1a2620; }
+.schedule-member-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.schedule-member-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-member-count { color: #98a29e; font-size: 12px; }
+
 .gantt-workspace { min-height: 0; flex: 1; display: flex; flex-direction: column; background: #fff; }
 .dark .gantt-workspace { background: #101713; }
 .gantt-toolbar {

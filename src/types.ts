@@ -78,10 +78,10 @@ export interface AppState {
   currentUserId: string | null;
   darkMode: boolean;
   studentProfiles?: StudentProfile[];
+  profileFieldDefs?: ProfileFieldDef[];
 }
 
 export interface FilterState {
-  assigneeFilter: "all" | string;
   statusFilter: "all" | "active" | "completed";
   viewMode: "day" | "week" | "month";
   keyword: string;

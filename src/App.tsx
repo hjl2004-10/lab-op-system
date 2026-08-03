@@ -127,6 +127,8 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
               filters={state.filters}
               isAdmin={isAdmin}
               holidays={holidays}
+              selectedStudentIds={state.selectedStudentIds}
+              onSelectedStudentIdsChange={state.setSelectedStudentIds}
               onFiltersChange={state.setFilters}
               onAddTask={() => setShowAddTask(true)}
               onTaskClick={setEditingTask}
@@ -143,11 +145,18 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
               profiles={state.studentProfiles || []}
               isAdmin={isAdmin}
               currentUserId={currentUserId}
+              selectedStudentIds={state.selectedStudentIds}
+              onSelectedStudentIdsChange={state.setSelectedStudentIds}
+              profileFieldDefs={state.profileFieldDefs}
               onUpdateProfile={state.updateProfile}
               onUpdateProfileAdminData={state.updateProfileAdminData}
               onReorderProfileFields={state.reorderProfileFields}
               onAddCategory={state.addProfileCategory}
               onRemoveField={state.removeProfileField}
+              addProfileFieldDef={state.addProfileFieldDef}
+              removeProfileFieldDef={state.removeProfileFieldDef}
+              addProfileFieldOption={state.addProfileFieldOption}
+              removeProfileFieldOption={state.removeProfileFieldOption}
             />
           }
         />

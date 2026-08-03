@@ -1,4 +1,4 @@
-import type { Person, Task } from "./types";
+import type { Person, Task, ProfileFieldDef } from "./types";
 
 // ============================================================
 // 50-color palette t0
@@ -352,3 +352,60 @@ export const holidays: Record<string, string> = {
   "2026-10-06": "国庆",
   "2026-10-07": "国庆",
 };
+
+// ============================================================
+// 学生档案预设字段（全局，教师可增删字段与可选项）
+// 注意：性别 options 顺序固定为 ["男","女"]，与表格同值同色色板
+// （索引0=蓝/男、1=粉/女）强绑定，请勿调整顺序。
+// ============================================================
+export const initialProfileFieldDefs: ProfileFieldDef[] = [
+  { key: "studentId", label: "学号", type: "text", category: "fillable" },
+  { key: "gender", label: "性别", type: "select", category: "selectable", options: ["男", "女"] },
+  {
+    key: "mbti",
+    label: "MBTI",
+    type: "select",
+    category: "selectable",
+    options: [
+      "ISTJ", "ISFJ", "INFJ", "INTJ", "ISTP", "ISFP", "INFP", "INTP",
+      "ESTP", "ESFP", "ENFP", "ENTP", "ESTJ", "ESFJ", "ENFJ", "ENTJ",
+    ],
+  },
+  {
+    key: "major",
+    label: "专业",
+    type: "select",
+    category: "selectable",
+    options: ["计算机科学与技术", "软件工程", "电子信息", "通信工程", "自动化", "人工智能", "数据科学", "网络安全", "其他"],
+  },
+  { key: "college", label: "学院", type: "select", category: "selectable", options: [] },
+  {
+    key: "entryYear",
+    label: "入学年份",
+    type: "select",
+    category: "selectable",
+    options: ["2023", "2024", "2025", "2026", "2027"],
+  },
+  {
+    key: "careerPlan",
+    label: "毕业意向",
+    type: "select",
+    category: "selectable",
+    options: ["继续深造", "工业界", "学术界", "创业", "待定"],
+  },
+  {
+    key: "program",
+    label: "培养方式",
+    type: "select",
+    category: "selectable",
+    options: ["学硕", "专硕", "直博", "普博", "本科毕设", "访问学生"],
+  },
+  {
+    key: "team",
+    label: "中心团队",
+    type: "select",
+    category: "selectable",
+    options: ["算法组", "工程组", "产品组", "设计组", "研究组", "实习组"],
+  },
+  { key: "ugSchool", label: "本科院校", type: "text", category: "fillable" },
+];

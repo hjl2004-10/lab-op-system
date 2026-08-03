@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Plus, Search, X } from "lucide-react";
 import GanttWorkspace from "@/components/workspace/GanttWorkspace";
+import StudentCards from "@/components/workspace/StudentCards";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,6 +21,8 @@ interface SchedulePageProps {
   filters: FilterState;
   isAdmin: boolean;
   holidays: Record<string, string>;
+  selectedStudentIds: string[];
+  onSelectedStudentIdsChange: (ids: string[]) => void;
   onFiltersChange: (updater: (current: FilterState) => FilterState) => void;
   onAddTask: () => void;
   onTaskClick: (task: Task) => void;
@@ -34,6 +37,8 @@ export default function SchedulePage({
   filters,
   isAdmin,
   holidays,
+  selectedStudentIds,
+  onSelectedStudentIdsChange,
   onFiltersChange,
   onAddTask,
   onTaskClick,
@@ -48,10 +53,22 @@ export default function SchedulePage({
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [people]
   );
+
+  // -- 学生专属卡片：仅列出学生，默认全选，勾选影响任务视图与档案表格 --
+  const memberStudents = useMemo(
+    () => members.filter((person) => person.role === "member"),
+    [members]
+  );
+  // 每人任务数用 allTasks（未过滤），避免随筛选变小而失真
+  const taskCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allTasks.forEach((task) => {
+      counts[task.assigneeId] = (counts[task.assigneeId] ?? 0) + 1;
+    });
+    return counts;
+  }, [allTasks]);
   const hasFilters =
-    filters.assigneeFilter !== "all" ||
-    filters.statusFilter !== "all" ||
-    filters.keyword.trim() !== "";
+    filters.statusFilter !== "all" || filters.keyword.trim() !== "";
 
   const setFilter = <K extends keyof FilterState>(
     key: K,
@@ -79,6 +96,15 @@ export default function SchedulePage({
         </Button>
       </section>
 
+      {isAdmin && (
+        <StudentCards
+          students={memberStudents}
+          selectedStudentIds={selectedStudentIds}
+          onSelectedStudentIdsChange={onSelectedStudentIdsChange}
+          taskCounts={taskCounts}
+        />
+      )}
+
       <section className="schedule-filters" aria-label="任务筛选">
         <div className="schedule-search">
           <Search size={16} />
@@ -98,26 +124,6 @@ export default function SchedulePage({
             </button>
           )}
         </div>
-
-        {isAdmin && (
-          <label className="schedule-filter-field">
-            <span>成员</span>
-            <Select
-              value={filters.assigneeFilter}
-              onValueChange={(value) => setFilter("assigneeFilter", value)}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部成员</SelectItem>
-                {members.map((person) => (
-                  <SelectItem key={person.id} value={person.id}>
-                    {person.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-        )}
 
         <label className="schedule-filter-field">
           <span>状态</span>
@@ -144,7 +150,6 @@ export default function SchedulePage({
             onClick={() =>
               onFiltersChange((current) => ({
                 ...current,
-                assigneeFilter: "all",
                 statusFilter: "all",
                 keyword: "",
               }))

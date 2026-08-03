@@ -11,6 +11,7 @@ export interface RemoteState {
   people: AppState["people"];
   tasks: AppState["tasks"];
   studentProfiles: NonNullable<AppState["studentProfiles"]>;
+  profileFieldDefs: NonNullable<AppState["profileFieldDefs"]>;
 }
 
 export class ApiError extends Error {
