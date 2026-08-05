@@ -25,18 +25,18 @@ export function sortFieldsForDisplay(defs: ProfileFieldDef[]): ProfileFieldDef[]
 export const FIELD_OPTION_PALETTE = [
   "#3B82F6", // 0 蓝（男）
   "#EC4899", // 1 粉（女）
-  "#22C55E",
+  "#1D9BF0",
   "#F59E0B",
   "#8B5CF6",
-  "#14B8A6",
+  "#2E8BC0",
   "#EF4444",
   "#F97316",
   "#06B6D4",
-  "#84CC16",
+  "#4F8ED0",
   "#A855F7",
   "#0EA5E9",
   "#F43F5E",
-  "#10B981",
+  "#3B9BDF",
   "#EAB308",
   "#6366F1",
 ];

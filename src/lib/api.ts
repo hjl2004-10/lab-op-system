@@ -1,10 +1,10 @@
-import type { AppState } from "@/types";
+import type { AppState, Role } from "@/types";
 
 export interface AuthUser {
   personId: string;
   username: string;
   name: string;
-  role: "admin" | "member";
+  role: Role;
 }
 
 export interface RemoteState {
@@ -12,6 +12,7 @@ export interface RemoteState {
   tasks: AppState["tasks"];
   studentProfiles: NonNullable<AppState["studentProfiles"]>;
   profileFieldDefs: NonNullable<AppState["profileFieldDefs"]>;
+  classes: NonNullable<AppState["classes"]>;
 }
 
 export class ApiError extends Error {
@@ -73,7 +74,7 @@ export const api = {
     personId: string;
     username: string;
     name: string;
-    role: "admin" | "member";
+    role: Role;
     password: string;
   }) => request<{ user: AuthUser }>("/api/users", {
     method: "POST",

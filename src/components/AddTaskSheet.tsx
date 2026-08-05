@@ -31,7 +31,7 @@ interface AddTaskSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   people: Person[];
-  isAdmin: boolean;
+  canAssignTasks: boolean;
   currentUserId: string | null;
   onAdd: (task: NewTask) => void;
 }
@@ -56,10 +56,10 @@ const today = () => new Date().toISOString().split("T")[0];
 
 function createInitialForm(
   people: Person[],
-  isAdmin: boolean,
+  canAssignTasks: boolean,
   currentUserId: string | null
 ): TaskForm {
-  const initialAssigneeId = isAdmin
+  const initialAssigneeId = canAssignTasks
     ? people.find((person) => person.status === "active")?.id ?? ""
     : currentUserId ?? "";
   const currentDate = today();
@@ -78,29 +78,29 @@ export default function AddTaskSheet({
   open,
   onOpenChange,
   people,
-  isAdmin,
+  canAssignTasks,
   currentUserId,
   onAdd,
 }: AddTaskSheetProps) {
   const availableAssignees = useMemo(
     () =>
-      isAdmin
+      canAssignTasks
         ? people.filter((person) => person.status === "active")
         : people.filter((person) => person.id === currentUserId),
-    [currentUserId, isAdmin, people]
+    [currentUserId, canAssignTasks, people]
   );
   const [form, setForm] = useState<TaskForm>(() =>
-    createInitialForm(people, isAdmin, currentUserId)
+    createInitialForm(people, canAssignTasks, currentUserId)
   );
   const [errors, setErrors] = useState<FormErrors>({});
-  const effectiveAssigneeId = isAdmin
+  const effectiveAssigneeId = canAssignTasks
     ? availableAssignees.some((person) => person.id === form.assigneeId)
       ? form.assigneeId
       : availableAssignees[0]?.id ?? ""
     : currentUserId ?? "";
 
   const resetForm = () => {
-    setForm(createInitialForm(people, isAdmin, currentUserId));
+    setForm(createInitialForm(people, canAssignTasks, currentUserId));
     setErrors({});
   };
 
@@ -192,7 +192,7 @@ export default function AddTaskSheet({
                   setForm((previous) => ({ ...previous, assigneeId: value }));
                   setErrors((previous) => ({ ...previous, assigneeId: undefined }));
                 }}
-                disabled={!isAdmin}
+                disabled={!canAssignTasks}
               >
                 <SelectTrigger
                   id="add-task-assignee"
@@ -275,7 +275,7 @@ export default function AddTaskSheet({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="add-task-progress">进度</Label>
-                <span className="text-sm font-medium text-[#236b5a] dark:text-emerald-400">
+                <span className="text-sm font-medium text-[#2f6db3] dark:text-blue-400">
                   {form.progress}%
                 </span>
               </div>
@@ -292,7 +292,7 @@ export default function AddTaskSheet({
                 max={100}
                 step={1}
                 aria-label="任务进度"
-                className="[&_[data-slot=slider-range]]:bg-[#236b5a] [&_[data-slot=slider-thumb]]:border-[#236b5a]"
+                className="[&_[data-slot=slider-range]]:bg-[#2f6db3] [&_[data-slot=slider-thumb]]:border-[#2f6db3]"
               />
             </div>
 
@@ -324,7 +324,7 @@ export default function AddTaskSheet({
             </Button>
             <Button
               type="submit"
-              className="bg-[#236b5a] text-white hover:bg-[#1b5548]"
+              className="bg-[#2f6db3] text-white hover:bg-[#1e4a75]"
             >
               <Plus className="size-4" />
               创建任务

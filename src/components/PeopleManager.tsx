@@ -4,6 +4,7 @@ import {
   Archive,
   ArchiveRestore,
   CheckCircle2,
+  GraduationCap,
   GripVertical,
   KeyRound,
   Save,
@@ -23,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { Person } from "@/types";
+import type { Person, Role } from "@/types";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_-]{2,32}$/;
 
@@ -34,7 +35,7 @@ function isStrongPassword(password: string) {
 interface NewAccount {
   username: string;
   name: string;
-  role: "admin" | "member";
+  role: Role;
   password: string;
 }
 
@@ -42,6 +43,10 @@ interface PeopleManagerProps {
   open: boolean;
   people: Person[];
   currentUserId: string;
+  /** 可创建的角色列表（admin 全部；teacher 仅学生） */
+  allowRoles?: Role[];
+  /** 仅显示这些 person 的列表（老师只见自己可管理的学生），null=全部 */
+  restrictedToIds?: Set<string> | null;
   onOpenChange: (open: boolean) => void;
   onAdd: (account: NewAccount) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -146,12 +151,22 @@ function AccountRow({
       <div className="account-identity">
         <span className="account-drag">{draggable ? <GripVertical size={16} /> : null}</span>
         <span className="account-avatar" style={{ backgroundColor: person.color }}>
-          {person.role === "admin" ? <Shield size={16} /> : <User size={16} />}
+          {person.role === "admin" ? (
+            <Shield size={16} />
+          ) : person.role === "teacher" ? (
+            <GraduationCap size={16} />
+          ) : (
+            <User size={16} />
+          )}
         </span>
         <div>
           <strong>{person.name}</strong>
           <span>
-            {person.role === "admin" ? "管理员" : "学生"}
+            {person.role === "admin"
+              ? "管理员"
+              : person.role === "teacher"
+                ? "老师"
+                : "学生"}
             {isCurrent ? " · 当前账户" : ""}
           </span>
         </div>
@@ -226,6 +241,8 @@ export default function PeopleManager({
   open,
   people,
   currentUserId,
+  allowRoles = ["student", "teacher", "admin"],
+  restrictedToIds = null,
   onOpenChange,
   onAdd,
   onDelete,
@@ -241,17 +258,23 @@ export default function PeopleManager({
   const [newAccount, setNewAccount] = useState<NewAccount>({
     username: "",
     name: "",
-    role: "member",
+    role: "student",
     password: "",
   });
 
+  const visible = (person: Person) =>
+    !restrictedToIds || restrictedToIds.has(person.id);
+
   const activePeople = useMemo(
-    () => people.filter((person) => person.status !== "archived").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-    [people]
+    () =>
+      people
+        .filter((person) => person.status !== "archived" && visible(person))
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [people, restrictedToIds]
   );
   const archivedPeople = useMemo(
-    () => people.filter((person) => person.status === "archived"),
-    [people]
+    () => people.filter((person) => person.status === "archived" && visible(person)),
+    [people, restrictedToIds]
   );
 
   const createAccount = async () => {
@@ -272,7 +295,7 @@ export default function PeopleManager({
     setCreateError("");
     try {
       await onAdd(account);
-      setNewAccount({ username: "", name: "", role: "member", password: "" });
+      setNewAccount({ username: "", name: "", role: "student", password: "" });
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "账户创建失败");
     } finally {
@@ -348,8 +371,9 @@ export default function PeopleManager({
               onChange={(event) => setNewAccount((value) => ({ ...value, role: event.target.value as NewAccount["role"] }))}
               aria-label="账户角色"
             >
-              <option value="member">学生</option>
-              <option value="admin">管理员</option>
+              {allowRoles.includes("student") && <option value="student">学生</option>}
+              {allowRoles.includes("teacher") && <option value="teacher">老师</option>}
+              {allowRoles.includes("admin") && <option value="admin">管理员</option>}
             </select>
             <Input
               type="password"

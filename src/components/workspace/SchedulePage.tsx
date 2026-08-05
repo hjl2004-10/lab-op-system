@@ -19,7 +19,7 @@ interface SchedulePageProps {
   allTasks: Task[];
   people: Person[];
   filters: FilterState;
-  isAdmin: boolean;
+  isManager: boolean;
   holidays: Record<string, string>;
   selectedStudentIds: string[];
   onSelectedStudentIdsChange: (ids: string[]) => void;
@@ -35,7 +35,7 @@ export default function SchedulePage({
   allTasks,
   people,
   filters,
-  isAdmin,
+  isManager,
   holidays,
   selectedStudentIds,
   onSelectedStudentIdsChange,
@@ -56,7 +56,7 @@ export default function SchedulePage({
 
   // -- 学生专属卡片：仅列出学生，默认全选，勾选影响任务视图与档案表格 --
   const memberStudents = useMemo(
-    () => members.filter((person) => person.role === "member"),
+    () => members.filter((person) => person.role === "student"),
     [members]
   );
   // 每人任务数用 allTasks（未过滤），避免随筛选变小而失真
@@ -96,7 +96,7 @@ export default function SchedulePage({
         </Button>
       </section>
 
-      {isAdmin && (
+      {isManager && (
         <StudentCards
           students={memberStudents}
           selectedStudentIds={selectedStudentIds}

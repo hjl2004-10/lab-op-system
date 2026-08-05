@@ -40,6 +40,7 @@ export interface ProfilesPageProps {
   people: Person[];
   profiles: StudentProfile[];
   isAdmin: boolean;
+  isManager: boolean;
   currentUserId: string | null;
   selectedStudentIds: string[];
   onSelectedStudentIdsChange: (ids: string[]) => void;
@@ -73,6 +74,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
     people,
     profiles,
     isAdmin,
+    isManager,
     currentUserId,
     selectedStudentIds,
     onSelectedStudentIdsChange,
@@ -91,7 +93,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
   const students = useMemo(
     () =>
       people
-        .filter((person) => person.role === "member")
+        .filter((person) => person.role === "student")
         .sort((a, b) => {
           if (a.status === "archived" && b.status !== "archived") return 1;
           if (a.status !== "archived" && b.status === "archived") return -1;
@@ -102,14 +104,14 @@ export default function ProfilesPage(props: ProfilesPageProps) {
 
   const visibleStudents = useMemo(
     () =>
-      isAdmin
+      isManager
         ? students
         : students.filter((person) => person.id === currentUserId),
-    [currentUserId, isAdmin, students]
+    [currentUserId, isManager, students]
   );
 
   const [selectedPersonId, setSelectedPersonId] = useState(
-    isAdmin ? students[0]?.id ?? "" : currentUserId ?? ""
+    isManager ? students[0]?.id ?? "" : currentUserId ?? ""
   );
   const [editingPublic, setEditingPublic] = useState(false);
   const [publicDraft, setPublicDraft] = useState<Record<string, string>>({});
@@ -187,7 +189,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
   // 教师备注区字段 = 全局预设字段（教师填写，存 adminOnlyData.values）+
   // 每学生自定义字段（adminOnlyData.fields，预设 key 去重）
   const adminFields = useMemo<ProfileFieldDef[]>(() => {
-    if (!isAdmin) return [];
+    if (!isManager) return [];
     const definedFields = (selectedProfile?.adminOnlyData?.fields ?? []).filter(
       (field) => !presetKeys.has(field.key)
     );
@@ -207,7 +209,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
       ...definedFields,
       ...valueOnlyFields,
     ];
-  }, [isAdmin, profileFieldDefs, presetKeys, selectedProfile]);
+  }, [isManager, profileFieldDefs, presetKeys, selectedProfile]);
 
   // 教师备注区里非预设的自定义字段（可移动/删除）
   const customAdminFields = useMemo(
@@ -323,14 +325,14 @@ export default function ProfilesPage(props: ProfilesPageProps) {
 
   return (
     <main className="min-w-0 space-y-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:p-6">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-emerald-900/15 pb-4 dark:border-emerald-300/15">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-blue-900/15 pb-4 dark:border-blue-300/15">
         <div>
-          <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
+          <div className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
             <GraduationCap className="size-5" />
             <h1 className="text-lg font-semibold">学生档案</h1>
           </div>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {isAdmin ? "查看学生公开资料与教师备注" : "维护我的公开档案"}
+            {isManager ? "查看学生公开资料与教师备注" : "维护我的公开档案"}
           </p>
         </div>
         {isAdmin && (
@@ -359,7 +361,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
       </header>
 
       {visibleStudents.length ? (
-        viewMode === "table" && isAdmin ? (
+        viewMode === "table" && isManager ? (
           <div className="space-y-4">
             <StudentCards
               students={students}
@@ -380,8 +382,8 @@ export default function ProfilesPage(props: ProfilesPageProps) {
             />
           </div>
         ) : (
-        <div className={cn("grid gap-4", isAdmin && "lg:grid-cols-[224px_minmax(0,1fr)]")}>
-          {isAdmin && (
+        <div className={cn("grid gap-4", isManager && "lg:grid-cols-[224px_minmax(0,1fr)]")}>
+          {isManager && (
             <aside className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="mb-2 px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-400">
                 成员 ({visibleStudents.length})
@@ -395,8 +397,8 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                     className={cn(
                       "flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                       effectiveSelectedPersonId === person.id
-                        ? "bg-emerald-800 font-medium text-white"
-                        : "text-slate-700 hover:bg-emerald-50 dark:text-slate-200 dark:hover:bg-emerald-950"
+                        ? "bg-blue-800 font-medium text-white"
+                        : "text-slate-700 hover:bg-blue-50 dark:text-slate-200 dark:hover:bg-blue-950"
                     )}
                   >
                     <span
@@ -420,7 +422,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex min-w-0 items-center gap-3">
                   <span
-                    className="flex size-10 shrink-0 items-center justify-center rounded-md bg-emerald-50 dark:bg-emerald-950"
+                    className="flex size-10 shrink-0 items-center justify-center rounded-md bg-blue-50 dark:bg-blue-950"
                     style={{ color: selectedPerson.color }}
                   >
                     <UserRound className="size-5" />
@@ -447,7 +449,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                     </Button>
                     <Button
                       size="sm"
-                      className="bg-emerald-800 hover:bg-emerald-700"
+                      className="bg-blue-800 hover:bg-blue-700"
                       onClick={savePublicProfile}
                     >
                       <Save className="size-4" />保存
@@ -531,7 +533,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                           )}
                         </span>
                       )}
-                      {isAdmin && editingPublic && !isProtectedFieldKey(fieldKey) && (
+                      {isManager && editingPublic && !isProtectedFieldKey(fieldKey) && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -559,8 +561,8 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                 </div>
               )}
 
-              {isAdmin && editingPublic && (
-                <div className="mt-4 rounded-lg border border-dashed border-emerald-300 p-3 dark:border-emerald-800">
+              {isManager && editingPublic && (
+                <div className="mt-4 rounded-lg border border-dashed border-blue-300 p-3 dark:border-blue-800">
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Input
                       value={newFieldName}
@@ -583,7 +585,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
 
             </article>
 
-            {isAdmin && selectedPerson && (
+            {isManager && selectedPerson && (
               <article className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 shadow-sm dark:border-amber-900 dark:bg-amber-950/20">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -610,7 +612,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                       </Button>
                       <Button
                         size="sm"
-                        className="bg-emerald-800 hover:bg-emerald-700"
+                        className="bg-blue-800 hover:bg-blue-700"
                         onClick={saveAdminData}
                       >
                         <Save className="size-4" />保存
@@ -844,7 +846,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
       ) : (
         <section className="flex min-h-56 flex-col items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-400 dark:border-slate-800 dark:bg-slate-900">
           <GraduationCap className="size-8" />
-          {isAdmin ? "暂无学生账户" : "未找到当前用户档案"}
+          {isManager ? "暂无学生账户" : "未找到当前用户档案"}
         </section>
       )}
 

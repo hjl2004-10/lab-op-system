@@ -199,9 +199,9 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
 
   return (
     <main className="min-w-0 space-y-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:p-6">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-emerald-900/15 pb-4 dark:border-emerald-300/15">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-blue-900/15 pb-4 dark:border-blue-300/15">
         <div>
-          <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
+          <div className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
             <Clock3 className="size-5" />
             <h1 className="text-lg font-semibold">进展历史</h1>
           </div>
@@ -218,7 +218,7 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
             size="sm"
             className={cn(
               "h-8 rounded-md text-xs",
-              viewMode === "table" && "bg-emerald-800 hover:bg-emerald-700"
+              viewMode === "table" && "bg-blue-800 hover:bg-blue-700"
             )}
             onClick={() => setViewMode("table")}
           >
@@ -230,7 +230,7 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
             size="sm"
             className={cn(
               "h-8 rounded-md text-xs",
-              viewMode === "gantt" && "bg-emerald-800 hover:bg-emerald-700"
+              viewMode === "gantt" && "bg-blue-800 hover:bg-blue-700"
             )}
             onClick={() => setViewMode("gantt")}
           >
@@ -301,7 +301,7 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
                   className={cn(
                     "rounded px-2.5 text-xs transition-colors",
                     statusFilter === option.value
-                      ? "bg-emerald-800 font-medium text-white"
+                      ? "bg-blue-800 font-medium text-white"
                       : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                   )}
                   onClick={() => setStatusFilter(option.value)}
@@ -435,7 +435,7 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
                         className={cn(
                           "shrink-0 border-r border-slate-200 py-2 text-center text-[10px] text-slate-500 dark:border-slate-800",
                           column.key === inputDate(new Date()) &&
-                            "bg-emerald-50 font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                            "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                         )}
                         style={{ width: DAY_WIDTH }}
                       >
@@ -481,11 +481,11 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
                           ))}
                         </div>
                         <div
-                          className="absolute top-2.5 h-5 rounded bg-emerald-700/75"
+                          className="absolute top-2.5 h-5 rounded bg-blue-700/75"
                           style={{
                             left,
                             width,
-                            backgroundColor: person?.color || "#15803d",
+                            backgroundColor: person?.color || "#2563eb",
                           }}
                           title={`${task.name}: ${task.startDate} - ${task.endDate}`}
                         />
@@ -497,7 +497,7 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
                           return (
                             <span
                               key={record.id}
-                              className="absolute top-3 size-4 -translate-x-1/2 rounded-full border-2 border-white bg-emerald-900 shadow-sm dark:border-slate-900"
+                              className="absolute top-3 size-4 -translate-x-1/2 rounded-full border-2 border-white bg-blue-900 shadow-sm dark:border-slate-900"
                               style={{ left: offset + DAY_WIDTH / 2 }}
                               title={`${record.author} · ${displayDate(record.date)} · ${record.currentProgress}`}
                             />

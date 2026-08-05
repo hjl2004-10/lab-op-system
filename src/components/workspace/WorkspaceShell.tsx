@@ -64,16 +64,17 @@ export default function WorkspaceShell({
     localStorage.setItem("workspace-sidebar-collapsed", String(collapsed));
   }, [collapsed]);
 
+  const isAdminOrTeacher = user.role === "admin" || user.role === "teacher";
   const navItems = [
     { to: "/schedule", label: "任务排期", icon: CalendarDays },
     {
       to: "/profiles",
-      label: user.role === "admin" ? "学生档案" : "我的档案",
+      label: isAdminOrTeacher ? "学生档案" : "我的档案",
       icon: GraduationCap,
     },
     { to: "/analytics", label: "数据统计", icon: BarChart3 },
     { to: "/history", label: "进展历史", icon: History },
-    ...(user.role === "admin"
+    ...(isAdminOrTeacher
       ? [{ to: "/system", label: "系统管理", icon: Settings }]
       : []),
   ];
@@ -198,7 +199,13 @@ export default function WorkspaceShell({
                   </span>
                   <span className="workspace-user-copy">
                     <strong>{user.name}</strong>
-                    <small>{user.role === "admin" ? "管理员" : "学生"}</small>
+                    <small>
+                      {user.role === "admin"
+                        ? "管理员"
+                        : user.role === "teacher"
+                          ? "老师"
+                          : "学生"}
+                    </small>
                   </span>
                   <ChevronRight size={14} />
                 </button>
@@ -212,7 +219,7 @@ export default function WorkspaceShell({
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => navigate("/profiles")}>
                   <GraduationCap />
-                  {user.role === "admin" ? "学生档案" : "我的档案"}
+                  {isAdminOrTeacher ? "学生档案" : "我的档案"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

@@ -1,6 +1,6 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { toPng } from "html-to-image";
-import type { Person, Task, StudentProfile, FilterState, ProgressRecord, ProfileFieldDef, AppState } from "@/types";
+import type { Person, Task, StudentProfile, FilterState, ProgressRecord, ProfileFieldDef, AppState, Class, Role } from "@/types";
 import { initialPeople, initialTasks, getColorForIndex, initialProfileFieldDefs } from "@/data";
 import {
   getStats,
@@ -35,11 +35,17 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   const [darkMode, setDarkMode] = useState<boolean>(() => localStorage.getItem("gantt-dark-mode") === "true");
   const [studentProfiles, setStudentProfiles] = useState<StudentProfile[]>([]);
   const [profileFieldDefs, setProfileFieldDefsState] = useState<ProfileFieldDef[]>(initialProfileFieldDefs);
+  const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [syncStatus, setSyncStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const hydratedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // -- 角色权限 --------------------------------------------------
+  const isAdmin = authUser?.role === "admin";
+  const isTeacher = authUser?.role === "teacher";
+  const isManager = isAdmin || isTeacher;
 
   useEffect(() => {
     localStorage.setItem("gantt-dark-mode", String(darkMode));
@@ -58,6 +64,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
       setPeople(state.people);
       setTasks(state.tasks);
       setStudentProfiles(state.studentProfiles || []);
+      setClasses(state.classes || []);
       // 服务端无预设字段（旧库）时兜底播种默认预设
       setProfileFieldDefsState(
         state.profileFieldDefs && state.profileFieldDefs.length
@@ -78,6 +85,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
             tasks: initialTasks,
             studentProfiles: [],
             profileFieldDefs: initialProfileFieldDefs,
+            classes: [],
           };
           await api.saveState(seed);
           if (active) applyState(seed);
@@ -108,7 +116,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       setSyncStatus("saving");
-      api.saveState({ people, tasks, studentProfiles, profileFieldDefs })
+      api.saveState({ people, tasks, studentProfiles, profileFieldDefs, classes })
         .then(() => setSyncStatus("saved"))
         .catch((error) => {
           console.error("Unable to save workspace", error);
@@ -118,17 +126,27 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [authUser, people, tasks, studentProfiles, profileFieldDefs, loadError, autoSave]);
+  }, [authUser, people, tasks, studentProfiles, profileFieldDefs, classes, loadError, autoSave]);
 
-  // -- 管理员勾选学生（主页学生专属卡片，跨任务/表格共享）--------
+  // -- 管理员/老师勾选学生（主页学生专属卡片，跨任务/表格共享）--
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   // people 加载后默认全选（当前为空才填充；"一键清空"后不自动恢复）
   useEffect(() => {
-    const members = people
-      .filter((p) => p.role === "member" && p.status !== "archived")
+    const studentIds = people
+      .filter((p) => p.role === "student" && p.status !== "archived")
       .map((p) => p.id);
-    if (selectedStudentIds.length === 0 && members.length > 0) {
-      setSelectedStudentIds(members);
+    let defaultIds: string[] = [];
+    if (isAdmin) {
+      defaultIds = studentIds;
+    } else if (isTeacher) {
+      // 老师只默认勾选自己创建的学生
+      defaultIds = studentIds.filter((id) => {
+        const s = people.find((p) => p.id === id);
+        return s?.createdBy === currentUserId;
+      });
+    }
+    if (selectedStudentIds.length === 0 && defaultIds.length > 0) {
+      setSelectedStudentIds(defaultIds);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [people]);
@@ -147,19 +165,17 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     [people, currentUserId]
   );
 
-  const isAdmin = authUser?.role === "admin";
-
   const filteredTasks = useMemo(() => {
     let result = [...tasks];
 
-    // MEMBER: can ONLY see their own tasks
-    if (currentUser?.role === "member") {
+    // STUDENT: can ONLY see their own tasks
+    if (currentUser?.role === "student") {
       result = result.filter((t) => t.assigneeId === currentUserId);
     }
-    // ADMIN: can see all tasks (existing logic)
+    // ADMIN/TEACHER: see all tasks, then filter by selected students
 
-    // 管理员按勾选学生过滤（admin 自己的任务始终可见）
-    if (isAdmin) {
+    // 按勾选学生过滤（本人任务始终可见）
+    if (isManager) {
       const selected = new Set(selectedStudentIds);
       result = result.filter(
         (t) => t.assigneeId === currentUserId || selected.has(t.assigneeId)
@@ -187,7 +203,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     }
 
     return result;
-  }, [tasks, filters, currentUser, currentUserId, isAdmin, selectedStudentIds]);
+  }, [tasks, filters, currentUser, currentUserId, isManager, selectedStudentIds]);
 
   const stats = useMemo(() => getStats(tasks), [tasks]);
 
@@ -337,8 +353,9 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     async (account: {
       username: string;
       name: string;
-      role: "admin" | "member";
+      role: Role;
       password: string;
+      classIds?: string[];
     }) => {
       const activePeople = people.filter((p) => p.status !== "archived");
       const index = activePeople.length;
@@ -356,10 +373,12 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
         role: account.role,
         order: index,
         status: "active",
+        classIds: account.classIds || [],
+        createdBy: currentUserId || undefined,
       };
       setPeople((prev) => [...prev, newPerson]);
     },
-    [people, setPeople]
+    [people, setPeople, currentUserId]
   );
 
   const deletePerson = useCallback(
@@ -437,6 +456,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     setTasks(initialTasks);
     setStudentProfiles([]);
     setProfileFieldDefsState(initialProfileFieldDefs);
+    setClasses([]);
     setFilters({
       statusFilter: "all",
       viewMode: "day",
@@ -453,6 +473,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
       darkMode,
       studentProfiles,
       profileFieldDefs,
+      classes,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
@@ -463,7 +484,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     a.download = `gantt-backup-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [people, tasks, currentUserId, darkMode, studentProfiles, profileFieldDefs]);
+  }, [people, tasks, currentUserId, darkMode, studentProfiles, profileFieldDefs, classes]);
 
   const importFromJson = useCallback(
     (json: string) => {
@@ -473,13 +494,14 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
         if (data.tasks) setTasks(data.tasks);
         if (data.studentProfiles) setStudentProfiles(data.studentProfiles);
         if (data.profileFieldDefs) setProfileFieldDefsState(data.profileFieldDefs);
+        if (data.classes) setClasses(data.classes);
         if (data.darkMode !== undefined) setDarkMode(data.darkMode);
         return true;
       } catch {
         return false;
       }
     },
-    [setPeople, setTasks, setStudentProfiles, setProfileFieldDefsState, setDarkMode]
+    [setPeople, setTasks, setStudentProfiles, setProfileFieldDefsState, setClasses, setDarkMode]
   );
 
   const exportImage = useCallback(async (element: HTMLElement) => {
@@ -667,7 +689,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
 
       // Create a new person for this student
       const newPersonId = `p${Date.now()}`;
-      const activeCount = people.filter(p => p.status !== "archived" && p.role === "member").length;
+      const activeCount = people.filter(p => p.status !== "archived" && p.role === "student").length;
       const colors = getColorForIndex(activeCount);
       const newPerson: Person = {
         id: newPersonId,
@@ -676,7 +698,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
         lightColor: colors.lightColor,
         borderColor: colors.borderColor,
         textColor: "#FFFFFF",
-        role: "member",
+        role: "student",
         order: activeCount,
         status: "active",
       };
@@ -925,6 +947,73 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     []
   );
 
+  // -- 班级管理（admin/teacher）----------------------------------
+  const addClass = useCallback((name: string): void => {
+    const value = name.trim();
+    if (!value) return;
+    const cls: Class = {
+      id: `c${Date.now()}`,
+      name: value,
+      teacherId: currentUserId || "",
+    };
+    setClasses((prev) => [...prev, cls]);
+  }, [currentUserId]);
+
+  const removeClass = useCallback((classId: string): void => {
+    setClasses((prev) => prev.filter((c) => c.id !== classId));
+    // 同时清掉学生身上该班级的归属
+    setPeople((prev) =>
+      prev.map((p) =>
+        p.classIds?.includes(classId)
+          ? { ...p, classIds: (p.classIds ?? []).filter((id) => id !== classId) }
+          : p
+      )
+    );
+  }, []);
+
+  const renameClass = useCallback((classId: string, name: string): void => {
+    setClasses((prev) =>
+      prev.map((c) => (c.id === classId ? { ...c, name: name.trim() || c.name } : c))
+    );
+  }, []);
+
+  const setClassMembers = useCallback((classId: string, memberIds: string[]): void => {
+    const memberSet = new Set(memberIds);
+    setPeople((prev) =>
+      prev.map((p) => {
+        if (p.role !== "student") return p;
+        const has = p.classIds?.includes(classId) ?? false;
+        if (memberSet.has(p.id) && !has) {
+          return { ...p, classIds: [...(p.classIds ?? []), classId] };
+        }
+        if (!memberSet.has(p.id) && has) {
+          return { ...p, classIds: (p.classIds ?? []).filter((id) => id !== classId) };
+        }
+        return p;
+      })
+    );
+  }, []);
+
+  // -- 权限 helper（供页面按角色控制）----------------------------
+  const canAssignTasks = isManager;
+  const canManageStudent = useCallback(
+    (personId: string): boolean => {
+      if (!isManager) return false;
+      if (isAdmin) return true;
+      const s = people.find((p) => p.id === personId);
+      if (!s || s.role !== "student") return false;
+      return s.createdBy === currentUserId;
+    },
+    [isManager, isAdmin, people, currentUserId]
+  );
+  const manageableStudentIds = useMemo(
+    () =>
+      people
+        .filter((p) => p.role === "student" && canManageStudent(p.id))
+        .map((p) => p.id),
+    [people, canManageStudent]
+  );
+
   // -- Dark mode on html element ---------------------------------
   const applyDarkMode = useCallback((dm: boolean) => {
     const root = document.documentElement;
@@ -942,8 +1031,9 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
       if (data.tasks) setTasks(data.tasks);
       if (data.studentProfiles !== undefined) setStudentProfiles(data.studentProfiles);
       if (data.profileFieldDefs !== undefined) setProfileFieldDefsState(data.profileFieldDefs);
+      if (data.classes !== undefined) setClasses(data.classes);
     },
-    [setPeople, setTasks, setStudentProfiles, setProfileFieldDefsState]
+    [setPeople, setTasks, setStudentProfiles, setProfileFieldDefsState, setClasses]
   );
 
   const flushSave = useCallback(async () => {
@@ -951,13 +1041,13 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSyncStatus("saving");
     try {
-      await api.saveState({ people, tasks, studentProfiles, profileFieldDefs });
+      await api.saveState({ people, tasks, studentProfiles, profileFieldDefs, classes });
       setSyncStatus("saved");
     } catch (error) {
       setSyncStatus("error");
       throw error;
     }
-  }, [authUser, people, tasks, studentProfiles, profileFieldDefs, loadError]);
+  }, [authUser, people, tasks, studentProfiles, profileFieldDefs, classes, loadError]);
 
   return {
     // State
@@ -972,7 +1062,12 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     stats,
     studentProfiles,
     profileFieldDefs,
+    classes,
     selectedStudentIds,
+    isTeacher,
+    isManager,
+    canAssignTasks,
+    manageableStudentIds,
     loading,
     loadError,
     syncStatus,
@@ -1026,5 +1121,12 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     addProfileFieldOption,
     removeProfileFieldOption,
     setProfileFieldDefs,
+
+    // 班级管理
+    addClass,
+    removeClass,
+    renameClass,
+    setClassMembers,
+    canManageStudent,
   };
 }

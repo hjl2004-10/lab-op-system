@@ -2,7 +2,6 @@ import { useState } from "react";
 import {
   ArrowRight,
   CalendarDays,
-  CheckCircle2,
   Eye,
   EyeOff,
   KeyRound,
@@ -10,16 +9,10 @@ import {
   LockKeyhole,
   UserRound,
 } from "lucide-react";
+
 interface LoginPageProps {
   onLogin: (username: string, password: string) => Promise<void>;
 }
-
-const previewRows = [
-  { name: "论文实验复现", owner: "杨嘉鑫", start: 7, width: 43, color: "#236b5a", progress: "68%" },
-  { name: "数据集清洗", owner: "蔡雨萱", start: 20, width: 32, color: "#c26a3b", progress: "45%" },
-  { name: "组会材料整理", owner: "杨老师", start: 2, width: 56, color: "#3e5d7a", progress: "82%" },
-  { name: "阶段报告提交", owner: "杨嘉鑫", start: 48, width: 24, color: "#7d6a37", progress: "20%" },
-];
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState("");
@@ -44,8 +37,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
   return (
     <main className="login-page">
-      <header className="login-brand">
-        <div className="login-mark" aria-hidden="true">
+      <header className="login-brand" aria-hidden="true">
+        <div className="login-mark">
           <CalendarDays size={19} strokeWidth={2} />
         </div>
         <div>
@@ -54,46 +47,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </div>
       </header>
 
-      <section className="login-preview" aria-label="甘特图工作区预览">
-        <div className="preview-heading">
-          <span>2026 / SUMMER</span>
-          <h1>把实验进度放在同一条时间线上</h1>
-        </div>
-        <div className="preview-board">
-          <div className="preview-toolbar">
-            <span>课题组总览</span>
-            <div>
-              <span>周视图</span>
-              <CheckCircle2 size={14} />
-            </div>
-          </div>
-          <div className="preview-grid">
-            <div className="preview-dates">
-              <span>07.13</span><span>07.20</span><span>07.27</span><span>08.03</span>
-            </div>
-            {previewRows.map((row) => (
-              <div className="preview-row" key={row.name}>
-                <div className="preview-label">
-                  <strong>{row.name}</strong>
-                  <span>{row.owner}</span>
-                </div>
-                <div className="preview-track">
-                  <div
-                    className="preview-task"
-                    style={{ left: `${row.start}%`, width: `${row.width}%`, background: row.color }}
-                  >
-                    <span>{row.progress}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section className="login-panel">
         <div className="login-form-wrap">
-          <div className="login-kicker"><LockKeyhole size={15} /> 安全工作区</div>
+          <div className="login-kicker">
+            <LockKeyhole size={15} /> 安全工作区
+          </div>
           <h2>登录实验室</h2>
           <p>使用分配给你的身份与密码进入。</p>
 
@@ -148,13 +106,16 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
             {error && <div className="login-error" role="alert">{error}</div>}
 
-            <button className="login-submit" type="submit" disabled={loading || !username.trim() || !password}>
+            <button
+              className="login-submit"
+              type="submit"
+              disabled={loading || !username.trim() || !password}
+            >
               {loading ? <LoaderCircle className="spin" size={18} /> : <ArrowRight size={18} />}
               {loading ? "正在验证" : "进入工作台"}
             </button>
           </form>
         </div>
-        <footer>YANG11 Laboratory · Gantt Workspace</footer>
       </section>
     </main>
   );

@@ -92,7 +92,7 @@ export default function StudentCards({
                 </span>
               )}
               {checked && (
-                <Check className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <Check className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
               )}
             </button>
           );

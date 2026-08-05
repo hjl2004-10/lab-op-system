@@ -1,3 +1,5 @@
+export type Role = "admin" | "teacher" | "student";
+
 export interface Person {
   id: string;
   username?: string;
@@ -6,9 +8,20 @@ export interface Person {
   lightColor: string;
   borderColor: string;
   textColor: string;
-  role: "admin" | "member";
+  role: Role;
   order?: number;
   status?: "active" | "archived";
+  /** 学生所属班级（可多班级或空） */
+  classIds?: string[];
+  /** 创建者 personId（老师"仅自己创建"可管理的依据） */
+  createdBy?: string;
+}
+
+/** 班级实体（teacherId = 创建老师） */
+export interface Class {
+  id: string;
+  name: string;
+  teacherId: string;
 }
 
 // Reply to a progress record (teacher can reply to student updates)
@@ -79,6 +92,7 @@ export interface AppState {
   darkMode: boolean;
   studentProfiles?: StudentProfile[];
   profileFieldDefs?: ProfileFieldDef[];
+  classes?: Class[];
 }
 
 export interface FilterState {
@@ -91,7 +105,7 @@ export interface FilterState {
 // Incremental sync data format (v3 with compression)
 export interface SyncDataV3 {
   v: 3;
-  fromRole: "admin" | "member";
+  fromRole: Role;
   fromPersonId: string;
   timestamp: number;
   people: Person[];
@@ -106,7 +120,7 @@ export interface SyncDataV3 {
 // Legacy v2 format for backward compatibility
 export interface SyncDataV2 {
   v: 2;
-  fromRole: "admin" | "member";
+  fromRole: Role;
   fromPersonId: string;
   people: Person[];
   tasks: Task[];

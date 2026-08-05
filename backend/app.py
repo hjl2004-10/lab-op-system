@@ -81,9 +81,10 @@ def initialize_database() -> None:
                 person_id TEXT PRIMARY KEY,
                 username TEXT UNIQUE,
                 name TEXT NOT NULL,
-                role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+                role TEXT NOT NULL CHECK (role IN ('admin', 'teacher', 'student')),
                 password_hash TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1,
+                created_by TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -109,20 +110,22 @@ def initialize_database() -> None:
         columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
         if "username" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN username TEXT")
+        if "created_by" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN created_by TEXT")
         db.execute("UPDATE users SET username = person_id WHERE username IS NULL OR username = ''")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE NOCASE)")
 
         seed_users = (
             ("p1", "admin", "杨老师", "admin", os.getenv("GANTT_ADMIN_PASSWORD", "xzcXZC123")),
-            ("p2", "p2", "杨嘉鑫", "member", secrets.token_urlsafe(24)),
-            ("p3", "p3", "蔡雨萱", "member", secrets.token_urlsafe(24)),
+            ("p2", "p2", "杨嘉鑫", "student", secrets.token_urlsafe(24)),
+            ("p3", "p3", "蔡雨萱", "student", secrets.token_urlsafe(24)),
         )
         for person_id, username, name, role, password in seed_users:
             db.execute(
                 """
                 INSERT OR IGNORE INTO users
-                    (person_id, username, name, role, password_hash, active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                    (person_id, username, name, role, password_hash, active, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?)
                 """,
                 (person_id, username, name, role, hash_password(password), now_iso(), now_iso()),
             )
@@ -141,6 +144,62 @@ def initialize_database() -> None:
                 )
             db.execute(
                 "INSERT OR REPLACE INTO system_meta (key, value) VALUES ('schema_version', '2')"
+            )
+            db.execute("DELETE FROM sessions")
+
+        if schema_version < 3:
+            # 重建 users 表：role CHECK 加 teacher/student，member→student，新增 created_by 列
+            db.execute("PRAGMA foreign_keys = OFF")
+            try:
+                db.executescript(
+                    """
+                    BEGIN;
+                    CREATE TABLE users_v3 (
+                        person_id TEXT PRIMARY KEY,
+                        username TEXT UNIQUE,
+                        name TEXT NOT NULL,
+                        role TEXT NOT NULL CHECK (role IN ('admin', 'teacher', 'student')),
+                        password_hash TEXT NOT NULL,
+                        active INTEGER NOT NULL DEFAULT 1,
+                        created_by TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    INSERT INTO users_v3
+                        (person_id, username, name, role, password_hash, active, created_by, created_at, updated_at)
+                    SELECT person_id, username, name,
+                           CASE WHEN role = 'member' THEN 'student' ELSE role END,
+                           password_hash, active, NULL, created_at, updated_at
+                    FROM users;
+                    DROP TABLE users;
+                    ALTER TABLE users_v3 RENAME TO users;
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE NOCASE);
+                    COMMIT;
+                    """
+                )
+            finally:
+                db.execute("PRAGMA foreign_keys = ON")
+
+            # app_state.payload：member→student，初始化 classes
+            state_row_v3 = db.execute("SELECT payload FROM app_state WHERE id = 1").fetchone()
+            if state_row_v3:
+                sp = json.loads(state_row_v3["payload"])
+                changed_v3 = False
+                for person in sp.get("people", []):
+                    if person.get("role") == "member":
+                        person["role"] = "student"
+                        changed_v3 = True
+                if "classes" not in sp:
+                    sp["classes"] = []
+                    changed_v3 = True
+                if changed_v3:
+                    db.execute(
+                        "UPDATE app_state SET payload = ?, updated_at = ? WHERE id = 1",
+                        (json.dumps(sp, ensure_ascii=False), now_iso()),
+                    )
+
+            db.execute(
+                "INSERT OR REPLACE INTO system_meta (key, value) VALUES ('schema_version', '3')"
             )
             db.execute("DELETE FROM sessions")
 
@@ -188,7 +247,7 @@ class UserCreateRequest(BaseModel):
     person_id: str = Field(min_length=2, max_length=64)
     username: str
     name: str = Field(min_length=1, max_length=40)
-    role: str = "member"
+    role: str = "student"
     password: str = Field(min_length=8, max_length=128)
 
     @field_validator("username")
@@ -204,7 +263,7 @@ class UserCreateRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def role_is_valid(cls, value: str) -> str:
-        if value not in {"admin", "member"}:
+        if value not in {"admin", "teacher", "student"}:
             raise ValueError("账户角色无效")
         return value
 
@@ -224,6 +283,7 @@ class StatePayload(BaseModel):
     tasks: list[dict[str, Any]]
     studentProfiles: list[dict[str, Any]] = Field(default_factory=list)
     profileFieldDefs: list[dict[str, Any]] = Field(default_factory=list)
+    classes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def public_user(row: sqlite3.Row) -> dict[str, Any]:
@@ -247,14 +307,18 @@ def sanitize_state(payload: dict[str, Any]) -> dict[str, Any]:
         "tasks": payload.get("tasks", []),
         "studentProfiles": payload.get("studentProfiles", []),
         "profileFieldDefs": payload.get("profileFieldDefs", []),
+        "classes": payload.get("classes", []),
     }
 
 
 def state_for_user(payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     clean = sanitize_state(payload)
-    if user["role"] == "admin":
+    role = user["role"]
+    if role in ("admin", "teacher"):
+        # admin/teacher 全量：老师要管理学生/班级/任务、可看教师备注
         return clean
 
+    # student 分支（沿用原 member 逻辑）
     person_id = user["personId"]
     profiles: list[dict[str, Any]] = []
     for profile in clean["studentProfiles"]:
@@ -270,6 +334,8 @@ def state_for_user(payload: dict[str, Any], user: dict[str, Any]) -> dict[str, A
         visible_person = dict(person)
         if visible_person.get("id") != person_id:
             visible_person.pop("username", None)
+            visible_person.pop("classIds", None)
+            visible_person.pop("createdBy", None)
         visible_people.append(visible_person)
     return {
         "people": visible_people,
@@ -277,6 +343,7 @@ def state_for_user(payload: dict[str, Any], user: dict[str, Any]) -> dict[str, A
         "studentProfiles": profiles,
         # 预设字段对所有角色可见（学生填档案需要用到可选项）
         "profileFieldDefs": clean["profileFieldDefs"],
+        "classes": [],
     }
 
 
@@ -321,6 +388,80 @@ def merge_member_state(
         "studentProfiles": profiles,
         # 忽略学生传入的预设字段，永远保留服务端定义，防止学生篡改
         "profileFieldDefs": stored.get("profileFieldDefs", []),
+        "classes": stored.get("classes", []),
+    }
+
+
+def teacher_can_manage(db: sqlite3.Connection, teacher_id: str, target_id: str) -> bool:
+    """老师只能管理自己创建的学生账号"""
+    row = db.execute(
+        "SELECT role, created_by FROM users WHERE person_id = ?", (target_id,)
+    ).fetchone()
+    if not row or row["role"] != "student":
+        return False
+    return row["created_by"] == teacher_id
+
+
+def merge_teacher_state(
+    stored: dict[str, Any], incoming: dict[str, Any], teacher_id: str
+) -> dict[str, Any]:
+    """老师保存 state：只接受自己创建的学生与自己创建的班级，
+    其他 admin/老师/他人学生的数据原样保留，防提权、防越权。"""
+    stored_people = stored.get("people", [])
+    incoming_people = incoming.get("people", [])
+    incoming_by_id = {p.get("id"): p for p in incoming_people}
+    manageable = {
+        p.get("id")
+        for p in stored_people + incoming_people
+        if p.get("role") == "student" and p.get("createdBy") == teacher_id
+    }
+
+    people: list[dict[str, Any]] = []
+    for person in stored_people:
+        pid = person.get("id")
+        if pid in manageable:
+            inc = incoming_by_id.get(pid)
+            if inc is None:
+                continue  # 老师删除了该学生
+            merged = dict(person)
+            protected = {
+                "id", "role", "createdBy", "username",
+                "color", "lightColor", "borderColor", "textColor",
+            }
+            for key, value in inc.items():
+                if key in protected:
+                    continue
+                merged[key] = value
+            merged["role"] = "student"  # 强制，防提权
+            if person.get("createdBy"):
+                merged["createdBy"] = person["createdBy"]
+            people.append(merged)
+        else:
+            people.append(person)  # 保留他人数据
+
+    # classes：自己的班以 incoming 为准（含删除），他人班级原样保留
+    classes = [c for c in stored.get("classes", []) if c.get("teacherId") != teacher_id]
+    classes += [c for c in incoming.get("classes", []) if c.get("teacherId") == teacher_id]
+
+    # studentProfiles：只接受可管理学生的档案
+    incoming_profiles = {p.get("personId"): p for p in incoming.get("studentProfiles", [])}
+    stored_profiles = stored.get("studentProfiles", [])
+    stored_profile_ids = {p.get("personId") for p in stored_profiles}
+    profiles = [
+        incoming_profiles.get(p.get("personId"), p)
+        for p in stored_profiles
+        if p.get("personId") not in manageable or p.get("personId") in incoming_profiles
+    ]
+    for pid, profile in incoming_profiles.items():
+        if pid in manageable and pid not in stored_profile_ids:
+            profiles.append(profile)
+
+    return {
+        "people": people,
+        "tasks": incoming.get("tasks", []),  # 老师等同 admin 任务权限（全量写）
+        "classes": classes,
+        "studentProfiles": profiles,
+        "profileFieldDefs": stored.get("profileFieldDefs", []),  # 老师只读预设字段
     }
 
 
@@ -331,7 +472,7 @@ def sync_users(db: sqlite3.Connection, people: list[dict[str, Any]]) -> None:
         username = str(person.get("username", "")).strip()
         name = str(person.get("name", "")).strip()
         role = person.get("role")
-        if not person_id or not name or role not in {"admin", "member"}:
+        if not person_id or not name or role not in {"admin", "teacher", "student"}:
             raise HTTPException(status_code=422, detail="成员数据不完整")
         active = 0 if person.get("status") == "archived" else 1
         active_ids.add(person_id)
@@ -356,10 +497,10 @@ def sync_users(db: sqlite3.Connection, people: list[dict[str, Any]]) -> None:
                 db.execute(
                     """
                     INSERT INTO users
-                        (person_id, username, name, role, password_hash, active, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (person_id, username, name, role, password_hash, active, created_by, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (person_id, username, name, role, hash_password(secrets.token_urlsafe(24)), active, now_iso(), now_iso()),
+                    (person_id, username, name, role, hash_password(secrets.token_urlsafe(24)), active, person.get("createdBy"), now_iso(), now_iso()),
                 )
             except sqlite3.IntegrityError as error:
                 raise HTTPException(status_code=409, detail="账号或学号已被使用") from error
@@ -466,15 +607,17 @@ def create_user(
     payload: UserCreateRequest,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可新增账户")
+    if user["role"] == "student":
+        raise HTTPException(status_code=403, detail="仅管理员或老师可新增账户")
+    if user["role"] == "teacher" and payload.role != "student":
+        raise HTTPException(status_code=403, detail="老师只能创建学生账户")
     with database() as db:
         try:
             db.execute(
                 """
                 INSERT INTO users
-                    (person_id, username, name, role, password_hash, active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                    (person_id, username, name, role, password_hash, active, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     payload.person_id,
@@ -482,6 +625,7 @@ def create_user(
                     payload.name.strip(),
                     payload.role,
                     hash_password(payload.password),
+                    user["personId"],
                     now_iso(),
                     now_iso(),
                 ),
@@ -498,9 +642,11 @@ def update_user(
     payload: UserUpdateRequest,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可修改账户")
+    if user["role"] == "student":
+        raise HTTPException(status_code=403, detail="仅管理员或老师可修改账户")
     with database() as db:
+        if user["role"] == "teacher" and not teacher_can_manage(db, user["personId"], person_id):
+            raise HTTPException(status_code=403, detail="只能管理自己创建的学生账户")
         try:
             result = db.execute(
                 "UPDATE users SET username = ?, name = ?, updated_at = ? WHERE person_id = ?",
@@ -519,11 +665,13 @@ def delete_user(
     person_id: str,
     user: dict[str, Any] = Depends(current_user),
 ) -> Response:
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可删除账户")
+    if user["role"] == "student":
+        raise HTTPException(status_code=403, detail="仅管理员或老师可删除账户")
     if person_id == user["personId"]:
         raise HTTPException(status_code=422, detail="不能删除当前登录账户")
     with database() as db:
+        if user["role"] == "teacher" and not teacher_can_manage(db, user["personId"], person_id):
+            raise HTTPException(status_code=403, detail="只能管理自己创建的学生账户")
         result = db.execute("DELETE FROM users WHERE person_id = ?", (person_id,))
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="账户不存在")
@@ -536,9 +684,11 @@ def reset_password(
     payload: PasswordResetRequest,
     user: dict[str, Any] = Depends(current_user),
 ) -> Response:
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="仅教师可重置成员密码")
+    if user["role"] == "student":
+        raise HTTPException(status_code=403, detail="仅管理员或老师可重置密码")
     with database() as db:
+        if user["role"] == "teacher" and not teacher_can_manage(db, user["personId"], person_id):
+            raise HTTPException(status_code=403, detail="只能管理自己创建的学生账户")
         result = db.execute(
             "UPDATE users SET password_hash = ?, updated_at = ? WHERE person_id = ?",
             (hash_password(payload.password), now_iso(), person_id),
@@ -572,11 +722,22 @@ def save_state(
     incoming = sanitize_state(payload.model_dump())
     with database() as db:
         row = db.execute("SELECT * FROM app_state WHERE id = 1").fetchone()
-        if not row and user["role"] != "admin":
+        if not row and user["role"] not in ("admin", "teacher"):
             raise HTTPException(status_code=403, detail="请先由教师初始化系统")
 
         if user["role"] == "admin":
             next_state = incoming
+            sync_users(db, next_state["people"])
+        elif user["role"] == "teacher":
+            stored = json.loads(row["payload"])
+            next_state = merge_teacher_state(stored, incoming, user["personId"])
+            # 防注入：incoming 新增的学生必须已存在于 users 表（老师通过 create_user 建的）
+            existing_ids = {
+                r["person_id"] for r in db.execute("SELECT person_id FROM users").fetchall()
+            }
+            for person in next_state["people"]:
+                if person.get("id") not in existing_ids:
+                    raise HTTPException(status_code=422, detail="存在未注册账户")
             sync_users(db, next_state["people"])
         else:
             stored = json.loads(row["payload"])

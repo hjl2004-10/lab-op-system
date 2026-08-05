@@ -17,7 +17,7 @@ import {
   ClipboardPaste,
   AlertCircle,
 } from "lucide-react";
-import type { Person, Task, StudentProfile, ProgressRecord } from "@/types";
+import type { Person, Task, StudentProfile, ProgressRecord, Role } from "@/types";
 
 // ------------------------------------------------------------------
 // Types
@@ -30,13 +30,13 @@ interface SyncPanelProps {
   tasks: Task[];
   studentProfiles: StudentProfile[];
   currentUserId: string | null;
-  currentUserRole: "admin" | "member" | null;
+  currentUserRole: Role | null;
   onImport: (data: { people?: Person[]; tasks?: Task[]; studentProfiles?: StudentProfile[] }) => void;
 }
 
 interface SyncPayload {
   v: number;
-  fromRole: "admin" | "member";
+  fromRole: Role;
   fromPersonId: string;
   fromPersonName: string;
   people: Person[];
@@ -64,7 +64,7 @@ function createMemberPayload(
   const myPerson = people.find((p) => p.id === myId);
   return {
     v: 2,
-    fromRole: "member",
+    fromRole: "student",
     fromPersonId: myId,
     fromPersonName: myPerson?.name || "",
     people: people.filter((p) => p.id === myId),
@@ -160,7 +160,7 @@ export default function SyncPanel({
 
   const isAdmin = currentUserRole === "admin";
   const students = useMemo(
-    () => people.filter((p) => p.role === "member"),
+    () => people.filter((p) => p.role === "student"),
     [people]
   );
 
@@ -256,7 +256,7 @@ export default function SyncPanel({
 
     // Step 2: if current user is member, filter to only their data
     // Use idMap to handle cross-device personId differences
-    if (currentUserRole === "member") {
+    if (currentUserRole === "student") {
       const myId = currentUserId || "";
       const filteredPeople = payload.people.filter(
         (p: Person) => p.id === myId || idMap[p.id] === myId
@@ -561,7 +561,7 @@ export default function SyncPanel({
               <div
                 className={`text-xs flex items-center gap-1 ${
                   importResultType === "success"
-                    ? "text-emerald-500"
+                    ? "text-blue-500"
                     : "text-red-500"
                 }`}
               >

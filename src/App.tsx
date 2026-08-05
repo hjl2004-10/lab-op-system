@@ -83,6 +83,8 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
   }
 
   const isAdmin = user.role === "admin";
+  const isTeacher = user.role === "teacher";
+  const isManager = isAdmin || isTeacher;
   const currentUserId = user.personId;
   const currentUserName = user.name;
 
@@ -125,7 +127,7 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
               allTasks={state.tasks}
               people={state.people}
               filters={state.filters}
-              isAdmin={isAdmin}
+              isManager={isManager}
               holidays={holidays}
               selectedStudentIds={state.selectedStudentIds}
               onSelectedStudentIdsChange={state.setSelectedStudentIds}
@@ -144,6 +146,7 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
               people={state.people}
               profiles={state.studentProfiles || []}
               isAdmin={isAdmin}
+              isManager={isManager}
               currentUserId={currentUserId}
               selectedStudentIds={state.selectedStudentIds}
               onSelectedStudentIdsChange={state.setSelectedStudentIds}
@@ -166,7 +169,7 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
             <AnalyticsPage
               tasks={state.tasks}
               people={state.people}
-              isAdmin={isAdmin}
+              isAdmin={isManager}
               currentUserId={currentUserId}
             />
           }
@@ -177,23 +180,32 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
             <HistoryPage
               tasks={state.tasks}
               people={state.people}
-              isAdmin={isAdmin}
+              isAdmin={isManager}
             />
           }
         />
         <Route
           path="/system"
           element={
-            isAdmin ? (
+            isManager ? (
               <SystemPage
                 people={state.people}
+                classes={state.classes}
                 currentUserId={currentUserId}
+                isAdmin={isAdmin}
+                isTeacher={isTeacher}
+                manageableStudentIds={state.manageableStudentIds}
+                canManageStudent={state.canManageStudent}
                 onAdd={state.addPerson}
                 onDelete={state.deletePerson}
                 onUpdateAccount={state.updateAccount}
                 onSetPassword={state.setPersonPassword}
                 onReorder={state.reorderPeople}
                 onArchive={state.toggleArchivePerson}
+                onAddClass={state.addClass}
+                onRemoveClass={state.removeClass}
+                onRenameClass={state.renameClass}
+                onSetClassMembers={state.setClassMembers}
                 autoSave={autoSave}
                 onToggleAutoSave={() => setAutoSave((value) => !value)}
                 onExportJson={state.exportToJson}
@@ -214,7 +226,7 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
         open={showAddTask}
         onOpenChange={setShowAddTask}
         people={state.people}
-        isAdmin={isAdmin}
+        canAssignTasks={isManager}
         currentUserId={currentUserId}
         onAdd={state.addTask}
       />
@@ -225,7 +237,7 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
           open
           task={editingTask}
           people={state.people}
-          isAdmin={isAdmin}
+          canAssignTasks={isManager}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
           onOpenChange={(open) => {

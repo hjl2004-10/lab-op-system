@@ -105,7 +105,7 @@ export function exportMemberData(
 
   return {
     v: 3,
-    fromRole: "member",
+    fromRole: "student",
     fromPersonId: personId,
     timestamp: Date.now(),
     people: memberPeople,
@@ -244,7 +244,7 @@ export function importSyncData(
   // Merge profiles
   const mergedProfiles: StudentProfile[] = currentProfiles.length > 0
     ? currentProfiles.map(p => ({ ...p }))
-    : mergedPeople.filter(p => p.role === "member").map(p => ({
+    : mergedPeople.filter(p => p.role === "student").map(p => ({
         personId: p.id,
         personName: p.name,
         data: {},

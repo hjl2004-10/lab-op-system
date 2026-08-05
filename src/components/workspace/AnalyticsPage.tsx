@@ -39,7 +39,7 @@ export interface AnalyticsPageProps {
 }
 
 const DISTRIBUTION_COLORS = {
-  completed: "#15803d",
+  completed: "#2563eb",
   inProgress: "#ca8a04",
   notStarted: "#64748b",
 };
@@ -145,7 +145,7 @@ export default function AnalyticsPage({
           name: person.name,
           progress,
           tasks: personTasks.length,
-          color: person.color || "#15803d",
+          color: person.color || "#2563eb",
         };
       }),
     [scopedPeople, scopedTasks]
@@ -163,9 +163,9 @@ export default function AnalyticsPage({
 
   return (
     <main className="min-w-0 space-y-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:p-6">
-      <header className="flex flex-col gap-3 border-b border-emerald-900/15 pb-4 sm:flex-row sm:items-end sm:justify-between dark:border-emerald-300/15">
+      <header className="flex flex-col gap-3 border-b border-blue-900/15 pb-4 sm:flex-row sm:items-end sm:justify-between dark:border-blue-300/15">
         <div>
-          <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
+          <div className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
             <BarChart3 className="size-5" />
             <h1 className="text-lg font-semibold">任务统计</h1>
           </div>
@@ -200,7 +200,7 @@ export default function AnalyticsPage({
             key={label}
             className="flex min-h-20 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900"
           >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
               <Icon className="size-4" />
             </span>
             <div className="min-w-0">

@@ -54,7 +54,7 @@ interface TaskEditDialogProps {
   open: boolean;
   task: Task | null;
   people: Person[];
-  isAdmin: boolean;
+  canAssignTasks: boolean;
   currentUserId: string | null;
   currentUserName: string;
   onOpenChange: (open: boolean) => void;
@@ -84,7 +84,7 @@ export default function TaskEditDialog({
   open,
   task,
   people,
-  isAdmin,
+  canAssignTasks,
   currentUserId,
   currentUserName,
   onOpenChange,
@@ -122,8 +122,8 @@ export default function TaskEditDialog({
   // Permission checks
   // Admin can edit all tasks; students can edit their own tasks
   const isOwner = currentUserId !== null && currentUserId === task?.assigneeId;
-  const canEditBasic = isAdmin || isOwner;
-  const canDelete = isAdmin || isOwner;
+  const canEditBasic = canAssignTasks || isOwner;
+  const canDelete = canAssignTasks || isOwner;
 
   const sortedHistory = useMemo(() => {
     if (!task) return [];
@@ -167,7 +167,7 @@ export default function TaskEditDialog({
       updates.endDate = form.endDate;
       updates.description = form.description;
     }
-    if (isAdmin) {
+    if (canAssignTasks) {
       updates.assigneeId = form.assigneeId;
     }
     onSave(task.id, updates);
@@ -225,7 +225,7 @@ export default function TaskEditDialog({
 
   // Can current user reply to a record?
   const userCanReply = () => {
-    if (isAdmin) return true;
+    if (canAssignTasks) return true;
     // Students can reply to records on their own tasks
     return currentUserId === task?.assigneeId;
   };
@@ -286,7 +286,7 @@ export default function TaskEditDialog({
               {/* Assignee */}
               <div className="space-y-1.5">
                 <Label className="text-xs text-slate-500">负责人</Label>
-                {isAdmin ? (
+                {canAssignTasks ? (
                   <Select
                     value={form.assigneeId ?? task.assigneeId}
                     onValueChange={(value) =>
@@ -509,7 +509,7 @@ export default function TaskEditDialog({
                       )}
                       {record.solutions && (
                         <p className="text-sm text-slate-700 dark:text-slate-300">
-                          <span className="text-emerald-600 font-medium text-xs">
+                          <span className="text-blue-600 font-medium text-xs">
                             思路:
                           </span>{" "}
                           {record.solutions}
@@ -612,7 +612,7 @@ export default function TaskEditDialog({
                 value={newSolutions}
                 onChange={(e) => setNewSolutions(e.target.value)}
                 placeholder="描述解决思路..."
-                className="min-h-[60px] text-sm border-l-4 border-emerald-400"
+                className="min-h-[60px] text-sm border-l-4 border-blue-400"
               />
               <Button
                 size="sm"
