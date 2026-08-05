@@ -199,13 +199,6 @@ export default function WorkspaceShell({
                   </span>
                   <span className="workspace-user-copy">
                     <strong>{user.name}</strong>
-                    <small>
-                      {user.role === "admin"
-                        ? "管理员"
-                        : user.role === "teacher"
-                          ? "老师"
-                          : "学生"}
-                    </small>
                   </span>
                   <ChevronRight size={14} />
                 </button>

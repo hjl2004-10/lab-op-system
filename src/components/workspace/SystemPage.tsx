@@ -402,7 +402,7 @@ export default function SystemPage({
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold">{cls.name}</span>
                           {!isOwn && (
-                            <Badge variant="secondary" className="text-[10px] font-normal">
+                            <Badge variant="secondary" className="text-sm font-normal">
                               {people.find((p) => p.id === cls.teacherId)?.name || "其他老师"}
                             </Badge>
                           )}

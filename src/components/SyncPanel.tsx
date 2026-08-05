@@ -505,7 +505,7 @@ export default function SyncPanel({
                   id="sync-code-text"
                   value={syncCode}
                   readOnly
-                  className="text-[10px] font-mono dark:bg-slate-800 dark:border-slate-700 h-28 resize-none"
+                  className="text-sm font-mono dark:bg-slate-800 dark:border-slate-700 h-28 resize-none"
                 />
                 <Button
                   size="sm"

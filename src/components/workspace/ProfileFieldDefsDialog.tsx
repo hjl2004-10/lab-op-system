@@ -103,7 +103,7 @@ export default function ProfileFieldDefsDialog({
                     </span>
                     <Badge
                       variant="secondary"
-                      className="rounded-md px-1.5 text-[10px] font-normal"
+                      className="rounded-md px-1.5 text-sm font-normal"
                     >
                       {TYPE_LABEL[field.type]}
                     </Badge>
@@ -111,7 +111,7 @@ export default function ProfileFieldDefsDialog({
                   {isProtectedFieldKey(field.key) ? (
                     <Badge
                       variant="secondary"
-                      className="rounded-md px-1.5 text-[10px] font-normal text-slate-400"
+                      className="rounded-md px-1.5 text-sm font-normal text-slate-400"
                     >
                       不可删除
                     </Badge>

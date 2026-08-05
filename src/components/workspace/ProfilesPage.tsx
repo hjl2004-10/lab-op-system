@@ -409,7 +409,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                     </span>
                     <span className="min-w-0 flex-1 truncate">{person.name}</span>
                     {person.status === "archived" && (
-                      <span className="shrink-0 text-[10px] opacity-70">已归档</span>
+                      <span className="shrink-0 text-sm opacity-70">已归档</span>
                     )}
                   </button>
                 ))}

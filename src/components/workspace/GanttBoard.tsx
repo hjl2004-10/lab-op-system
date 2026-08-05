@@ -316,7 +316,6 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
           {showTaskColumn && (
             <div className="gantt-board-task-header" style={taskCellStyle}>
               <span>任务</span>
-              <small>({tasks.length})</small>
               {showTimeline && onResizeStart && (
                 <button
                   className="gantt-board-resize"
@@ -345,7 +344,6 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
                   style={{ width: column.width, minWidth: column.width }}
                 >
                   <span>{column.label}</span>
-                  {column.subLabel && <small>{column.subLabel}</small>}
                   {column.holidayName && <em>{column.holidayName}</em>}
                 </div>
               ))}

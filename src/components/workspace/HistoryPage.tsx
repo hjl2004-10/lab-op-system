@@ -433,7 +433,7 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
                       <div
                         key={column.key}
                         className={cn(
-                          "shrink-0 border-r border-slate-200 py-2 text-center text-[10px] text-slate-500 dark:border-slate-800",
+                          "shrink-0 border-r border-slate-200 py-2 text-center text-sm text-slate-500 dark:border-slate-800",
                           column.key === inputDate(new Date()) &&
                             "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                         )}

@@ -44,7 +44,7 @@ export default function TaskBar({ task, person, left, width, onClick }: TaskBarP
 
       {/* Content layer */}
       <div className="absolute inset-0 flex items-center px-1.5">
-        <span className="text-[10px] text-white font-medium truncate drop-shadow-sm whitespace-nowrap">
+        <span className="text-sm text-white font-medium truncate drop-shadow-sm whitespace-nowrap">
           {showLabel ? `${task.name} ${task.progress}%` : `${task.progress}%`}
         </span>
       </div>
@@ -54,17 +54,17 @@ export default function TaskBar({ task, person, left, width, onClick }: TaskBarP
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 pointer-events-none">
           <div className="bg-slate-900 dark:bg-slate-700 text-white rounded-lg shadow-lg px-3 py-2 whitespace-nowrap">
             <div className="text-xs font-semibold">{task.name}</div>
-            <div className="text-[10px] text-slate-300 mt-0.5">
+            <div className="text-sm text-slate-300 mt-0.5">
               <span
                 className="inline-block w-2 h-2 rounded-full mr-1"
                 style={{ backgroundColor: bgColor }}
               />
               {person?.name ?? "未分配"}
             </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">
+            <div className="text-sm text-slate-400 mt-0.5">
               {formatDateRange(task.startDate, task.endDate)}
             </div>
-            <div className="text-[10px] text-slate-400">
+            <div className="text-sm text-slate-400">
               进度: {task.progress}%
             </div>
           </div>

@@ -93,7 +93,7 @@ export default function ProfileTablePreview({
                     />
                     <span className="font-medium">{person.name}</span>
                     {person.status === "archived" && (
-                      <span className="shrink-0 text-[10px] text-slate-400">已归档</span>
+                      <span className="shrink-0 text-sm text-slate-400">已归档</span>
                     )}
                   </button>
                 </TableCell>

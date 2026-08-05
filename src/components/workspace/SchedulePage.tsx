@@ -88,7 +88,6 @@ export default function SchedulePage({
             <strong>{stats.inProgress}</strong> 个进行中
             <span>·</span>
             整体进度 <strong>{stats.overallProgress}%</strong>
-            {tasks.length !== allTasks.length && <small>（当前筛选）</small>}
           </p>
         </div>
         <Button className="workspace-primary-action" onClick={onAddTask}>
