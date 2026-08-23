@@ -1,4 +1,4 @@
-import type { AppState, Role } from "@/types";
+import type { AppState, AttachmentMeta, Role } from "@/types";
 
 export interface AuthUser {
   personId: string;
@@ -93,4 +93,28 @@ export const api = {
     }),
   deleteUser: (personId: string) =>
     request<void>(`/api/users/${encodeURIComponent(personId)}`, { method: "DELETE" }),
+  uploadAttachment: async (file: File): Promise<AttachmentMeta> => {
+    // FormData 不能走 request()：浏览器需要自动生成 multipart boundary，不可手动设 Content-Type
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch("/api/attachments", {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (!response.ok) {
+      let message = "附件上传失败，请稍后重试";
+      try {
+        const body = await response.json();
+        if (typeof body.detail === "string") message = body.detail;
+      } catch {
+        // 服务器未返回 JSON 时保留通用提示
+      }
+      throw new ApiError(response.status, message);
+    }
+    return response.json() as Promise<AttachmentMeta>;
+  },
 };
+
+/** 附件下载地址（cookie 会话自动携带） */
+export const attachmentUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;

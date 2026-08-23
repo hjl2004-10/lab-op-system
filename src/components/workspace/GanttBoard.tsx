@@ -15,7 +15,7 @@ import {
   parseISO,
   startOfDay,
 } from "date-fns";
-import { GripVertical } from "lucide-react";
+import { GripVertical, Lock } from "lucide-react";
 import TaskBar from "@/components/TaskBar";
 import { cn } from "@/lib/utils";
 import { formatDateRange } from "@/utils";
@@ -439,7 +439,12 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
                       style={{ backgroundColor: person?.color ?? "#94a3b8" }}
                     />
                     <div className="gantt-board-task-copy">
-                      <strong title={task.name}>{task.name}</strong>
+                      <strong title={task.name} className="flex items-center gap-1">
+                        {task.isPrivate && (
+                          <Lock className="size-3 shrink-0 text-slate-400" aria-label="仅自己可见" />
+                        )}
+                        {task.name}
+                      </strong>
                       <span>
                         {formatDateRange(task.startDate, task.endDate)}
                         <em className={progressColor(task.progress)}>

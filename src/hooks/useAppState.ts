@@ -1,6 +1,6 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { toPng } from "html-to-image";
-import type { Person, Task, StudentProfile, FilterState, ProgressRecord, ProfileFieldDef, AppState, Class, Role } from "@/types";
+import type { Person, Task, StudentProfile, FilterState, ProgressRecord, ProfileFieldDef, AppState, Class, Role, AttachmentMeta } from "@/types";
 import { initialPeople, initialTasks, getColorForIndex, initialProfileFieldDefs } from "@/data";
 import {
   getStats,
@@ -267,7 +267,17 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   );
 
   const addProgressRecord = useCallback(
-    (taskId: string, record: { currentProgress: string; mainProblems: string; solutions: string; author: string; authorId: string }) => {
+    (
+      taskId: string,
+      record: {
+        currentProgress: string;
+        mainProblems: string;
+        solutions: string;
+        author: string;
+        authorId: string;
+        attachments: AttachmentMeta[];
+      }
+    ) => {
       const newRecord: ProgressRecord = {
         ...record,
         id: generateProgressId(),
@@ -294,7 +304,14 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   );
 
   const addProgressReply = useCallback(
-    (taskId: string, recordId: string, content: string, authorId: string, authorName: string) => {
+    (
+      taskId: string,
+      recordId: string,
+      content: string,
+      authorId: string,
+      authorName: string,
+      attachments: AttachmentMeta[] = []
+    ) => {
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
@@ -312,6 +329,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
                             author: authorName,
                             authorId,
                             content,
+                            attachments,
                           },
                         ],
                       }

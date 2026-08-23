@@ -12,15 +12,19 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import bcrypt
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, status
+from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+from urllib.parse import quote
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("GANTT_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / "gantt.db"
+ATTACHMENTS_DIR = DATA_DIR / "attachments"
+MAX_ATTACHMENT_MB = int(os.getenv("GANTT_MAX_ATTACHMENT_MB", "50"))
+ATTACHMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 DIST_DIR = BASE_DIR / "dist"
 SESSION_COOKIE = "yang11_session"
 SESSION_DAYS = 7
@@ -74,6 +78,7 @@ def database() -> Iterator[sqlite3.Connection]:
 
 def initialize_database() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     with database() as db:
         db.executescript(
             """
@@ -104,6 +109,13 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS system_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                uploader TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );
             """
         )
@@ -311,12 +323,38 @@ def sanitize_state(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def user_can_see_task(task: dict[str, Any], user: dict[str, Any]) -> bool:
+    """任务可见性：学生只看自己的任务；admin/teacher 看不到他人标记为私有的任务。"""
+    if user["role"] == "student":
+        return task.get("assigneeId") == user["personId"]
+    if task.get("isPrivate") and task.get("assigneeId") != user["personId"]:
+        return False
+    return True
+
+
+def merge_hidden_tasks(
+    stored: dict[str, Any], incoming_tasks: list[dict[str, Any]], user: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """admin/teacher 保存时，其 GET 已被过滤掉看不到的任务（学生私有任务），
+    若照 incoming 全量写入会把这些任务删掉，这里从存储中补回。"""
+    incoming_ids = {task.get("id") for task in incoming_tasks}
+    hidden = [
+        task
+        for task in stored.get("tasks", [])
+        if not user_can_see_task(task, user) and task.get("id") not in incoming_ids
+    ]
+    return incoming_tasks + hidden
+
+
 def state_for_user(payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     clean = sanitize_state(payload)
     role = user["role"]
     if role in ("admin", "teacher"):
-        # admin/teacher 全量：老师要管理学生/班级/任务、可看教师备注
-        return clean
+        # admin/teacher：可管理学生/班级/任务、可看教师备注，但看不到他人私有任务
+        return {
+            **clean,
+            "tasks": [task for task in clean["tasks"] if user_can_see_task(task, user)],
+        }
 
     # student 分支（沿用原 member 逻辑）
     person_id = user["personId"]
@@ -458,7 +496,8 @@ def merge_teacher_state(
 
     return {
         "people": people,
-        "tasks": incoming.get("tasks", []),  # 老师等同 admin 任务权限（全量写）
+        # 老师任务权限等同 admin（可改可删），但要保留自己看不到的学生私有任务
+        "tasks": merge_hidden_tasks(stored, incoming.get("tasks", []), {"role": "teacher", "personId": teacher_id}),
         "classes": classes,
         "studentProfiles": profiles,
         "profileFieldDefs": stored.get("profileFieldDefs", []),  # 老师只读预设字段
@@ -700,6 +739,100 @@ def reset_password(
     return Response(status_code=204)
 
 
+def attachment_path(attachment_id: str) -> Path:
+    if not ATTACHMENT_ID_PATTERN.fullmatch(attachment_id):
+        raise HTTPException(status_code=404, detail="附件不存在")
+    return ATTACHMENTS_DIR / attachment_id
+
+
+def find_attachment_task(payload: dict[str, Any], attachment_id: str) -> dict[str, Any] | None:
+    """在 state 中定位附件所属的任务（附件可挂在进展记录或记录下的回复上）。"""
+    for task in payload.get("tasks", []):
+        for record in task.get("progressHistory", []):
+            if any(a.get("id") == attachment_id for a in record.get("attachments", [])):
+                return task
+            for reply in record.get("replies", []):
+                if any(a.get("id") == attachment_id for a in reply.get("attachments", [])):
+                    return task
+    return None
+
+
+@app.post("/api/attachments", status_code=status.HTTP_201_CREATED)
+async def upload_attachment(
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    attachment_id = secrets.token_urlsafe(16)
+    destination = ATTACHMENTS_DIR / attachment_id
+    max_bytes = MAX_ATTACHMENT_MB * 1024 * 1024
+    size = 0
+    try:
+        with destination.open("wb") as buffer:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    buffer.close()
+                    destination.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"单个附件不能超过 {MAX_ATTACHMENT_MB}MB",
+                    )
+                buffer.write(chunk)
+        with database() as db:
+            db.execute(
+                "INSERT INTO attachments (id, name, size, uploader, created_at) VALUES (?, ?, ?, ?, ?)",
+                (attachment_id, file.filename or "未命名文件", size, user["personId"], now_iso()),
+            )
+    except HTTPException:
+        raise
+    except OSError as error:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="附件保存失败") from error
+    finally:
+        await file.close()
+    return {
+        "id": attachment_id,
+        "name": file.filename or "未命名文件",
+        "size": size,
+        "uploadedBy": user["personId"],
+        "uploadedAt": now_iso(),
+    }
+
+
+@app.get("/api/attachments/{attachment_id}")
+def download_attachment(
+    attachment_id: str,
+    user: dict[str, Any] = Depends(current_user),
+) -> FileResponse:
+    path = attachment_path(attachment_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="附件不存在或已删除")
+    with database() as db:
+        row = db.execute(
+            "SELECT * FROM attachments WHERE id = ?", (attachment_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="附件不存在或已删除")
+    with database() as db:
+        state_row = db.execute("SELECT payload FROM app_state WHERE id = 1").fetchone()
+    task = find_attachment_task(json.loads(state_row["payload"]), attachment_id) if state_row else None
+    if task is not None:
+        # 已挂进某条记录：按该任务的可见性判定（私有任务的附件教师不可下载）
+        if not user_can_see_task(task, user):
+            raise HTTPException(status_code=404, detail="附件不存在或已删除")
+    elif row["uploader"] != user["personId"]:
+        # 尚未挂进任何任务（刚上传、自动保存有延迟，或所在记录已被删除）：仅上传者可访问
+        raise HTTPException(status_code=404, detail="附件不存在或已删除")
+    filename = quote(row["name"])
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+        },
+    )
+
+
 @app.get("/api/state")
 def get_state(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     with database() as db:
@@ -727,6 +860,10 @@ def save_state(
 
         if user["role"] == "admin":
             next_state = incoming
+            # admin 的 GET 也看不到学生私有任务，全量覆盖前补回，防止误删
+            if row:
+                stored = json.loads(row["payload"])
+                next_state["tasks"] = merge_hidden_tasks(stored, incoming["tasks"], user)
             sync_users(db, next_state["people"])
         elif user["role"] == "teacher":
             stored = json.loads(row["payload"])

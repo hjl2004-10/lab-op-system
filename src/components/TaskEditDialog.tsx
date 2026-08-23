@@ -9,6 +9,7 @@ import {
   CircleDot,
   MessageSquare,
   Send,
+  Loader2,
 } from "lucide-react";
 import {
   Sheet,
@@ -48,7 +49,11 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import type { Task, Person } from "@/types";
+import { api } from "@/lib/api";
+import AttachmentPicker from "@/components/AttachmentPicker";
+import AttachmentList from "@/components/AttachmentList";
+import { Switch } from "@/components/ui/switch";
+import type { Task, Person, AttachmentMeta } from "@/types";
 
 interface TaskEditDialogProps {
   open: boolean;
@@ -68,6 +73,7 @@ interface TaskEditDialogProps {
       solutions: string;
       author: string;
       authorId: string;
+      attachments: AttachmentMeta[];
     }
   ) => void;
   onAddProgressReply: (
@@ -75,7 +81,8 @@ interface TaskEditDialogProps {
     recordId: string,
     content: string,
     authorId: string,
-    authorName: string
+    authorName: string,
+    attachments: AttachmentMeta[]
   ) => void;
   onSetRating: (taskId: string, rating: number) => void;
 }
@@ -102,10 +109,16 @@ export default function TaskEditDialog({
   const [newProgress, setNewProgress] = useState("");
   const [newProblems, setNewProblems] = useState("");
   const [newSolutions, setNewSolutions] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   // Reply form state
   const [replyContents, setReplyContents] = useState<Record<string, string>>({});
+  const [replyFiles, setReplyFiles] = useState<Record<string, File[]>>({});
   const [expandedReplyForms, setExpandedReplyForms] = useState<Record<string, boolean>>({});
+
+  // Attachment upload state
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Star rating state (local for visual feedback)
   const [hoveredStar, setHoveredStar] = useState(0);
@@ -124,6 +137,8 @@ export default function TaskEditDialog({
   const isOwner = currentUserId !== null && currentUserId === task?.assigneeId;
   const canEditBasic = canAssignTasks || isOwner;
   const canDelete = canAssignTasks || isOwner;
+  // 学生本人的任务可切换"仅自己可见"
+  const canTogglePrivate = !canAssignTasks && isOwner;
 
   const sortedHistory = useMemo(() => {
     if (!task) return [];
@@ -170,22 +185,44 @@ export default function TaskEditDialog({
     if (canAssignTasks) {
       updates.assigneeId = form.assigneeId;
     }
+    if (canTogglePrivate) {
+      updates.isPrivate = form.isPrivate ?? false;
+    }
     onSave(task.id, updates);
     onOpenChange(false);
   };
 
-  const handleAddRecord = () => {
-    if (!task || !newProgress.trim()) return;
-    onAddProgressRecord(task.id, {
-      currentProgress: newProgress,
-      mainProblems: newProblems,
-      solutions: newSolutions,
-      author: currentUserName,
-      authorId: currentUserId || "",
-    });
-    setNewProgress("");
-    setNewProblems("");
-    setNewSolutions("");
+  const uploadFiles = async (files: File[]): Promise<AttachmentMeta[]> => {
+    const uploaded: AttachmentMeta[] = [];
+    for (const file of files) {
+      uploaded.push(await api.uploadAttachment(file));
+    }
+    return uploaded;
+  };
+
+  const handleAddRecord = async () => {
+    if (!task || !newProgress.trim() || uploading) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const attachments = await uploadFiles(pendingFiles);
+      onAddProgressRecord(task.id, {
+        currentProgress: newProgress,
+        mainProblems: newProblems,
+        solutions: newSolutions,
+        author: currentUserName,
+        authorId: currentUserId || "",
+        attachments,
+      });
+      setNewProgress("");
+      setNewProblems("");
+      setNewSolutions("");
+      setPendingFiles([]);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "附件上传失败，请重试");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleStarClick = (rating: number) => {
@@ -210,17 +247,29 @@ export default function TaskEditDialog({
     setReplyContents((prev) => ({ ...prev, [recordId]: content }));
   };
 
-  const handleSendReply = (recordId: string) => {
-    if (!task || !replyContents[recordId]?.trim() || !currentUserId) return;
-    onAddProgressReply(
-      task.id,
-      recordId,
-      replyContents[recordId].trim(),
-      currentUserId,
-      currentUserName
-    );
-    setReplyContents((prev) => ({ ...prev, [recordId]: "" }));
-    setExpandedReplyForms((prev) => ({ ...prev, [recordId]: false }));
+  const handleSendReply = async (recordId: string) => {
+    if (!task || !replyContents[recordId]?.trim() || !currentUserId || uploading) return;
+    const files = replyFiles[recordId] ?? [];
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const attachments = await uploadFiles(files);
+      onAddProgressReply(
+        task.id,
+        recordId,
+        replyContents[recordId].trim(),
+        currentUserId,
+        currentUserName,
+        attachments
+      );
+      setReplyContents((prev) => ({ ...prev, [recordId]: "" }));
+      setReplyFiles((prev) => ({ ...prev, [recordId]: [] }));
+      setExpandedReplyForms((prev) => ({ ...prev, [recordId]: false }));
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "附件上传失败，请重试");
+    } finally {
+      setUploading(false);
+    }
   };
 
   // Can current user reply to a record?
@@ -245,6 +294,12 @@ export default function TaskEditDialog({
               style={{ color: assignee?.color ?? "#94a3b8" }}
             />
             <span className="truncate">{task.name}</span>
+            {task.isPrivate && (
+              <Badge variant="secondary" className="ml-1 shrink-0 gap-1 text-xs font-normal">
+                <Lock className="size-3" />
+                仅自己可见
+              </Badge>
+            )}
           </SheetTitle>
           <SheetDescription className="sr-only">
             编辑任务基本信息、进展记录和评分
@@ -407,6 +462,27 @@ export default function TaskEditDialog({
                   </p>
                 )}
               </div>
+
+              {/* Private switch (student's own task only) */}
+              {canTogglePrivate && (
+                <div className="space-y-1.5 rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700">
+                  <Label htmlFor="task-private-switch" className="text-xs text-slate-500">
+                    仅自己可见
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="task-private-switch"
+                      checked={Boolean(form.isPrivate)}
+                      onCheckedChange={(checked) =>
+                        setForm((prev) => ({ ...prev, isPrivate: checked }))
+                      }
+                    />
+                    <span className="text-xs text-slate-400">
+                      开启后该任务对教师不可见，仅自己可见
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Bottom buttons */}
@@ -515,6 +591,7 @@ export default function TaskEditDialog({
                           {record.solutions}
                         </p>
                       )}
+                      <AttachmentList attachments={record.attachments} />
                     </div>
 
                     {/* Replies */}
@@ -535,6 +612,7 @@ export default function TaskEditDialog({
                             <p className="text-sm text-slate-700 dark:text-slate-300">
                               {reply.content}
                             </p>
+                            <AttachmentList attachments={reply.attachments} />
                           </div>
                         ))}
                       </div>
@@ -555,24 +633,31 @@ export default function TaskEditDialog({
 
                         {/* Inline reply form */}
                         {expandedReplyForms[record.id] && (
-                          <div className="mt-2 flex gap-2 items-start">
-                            <Textarea
-                              value={replyContents[record.id] || ""}
-                              onChange={(e) =>
-                                handleReplyChange(record.id, e.target.value)
-                              }
-                              placeholder="输入回复内容..."
-                              className="min-h-[60px] text-sm flex-1"
-                            />
-                            <div className="flex flex-col gap-1">
-                              <Button
-                                size="sm"
-                                className="h-8 px-2"
-                                disabled={!replyContents[record.id]?.trim()}
-                                onClick={() => handleSendReply(record.id)}
-                              >
-                                <Send className="w-3.5 h-3.5" />
-                              </Button>
+                          <div className="mt-2 space-y-2">
+                            <div className="flex gap-2 items-start">
+                              <Textarea
+                                value={replyContents[record.id] || ""}
+                                onChange={(e) =>
+                                  handleReplyChange(record.id, e.target.value)
+                                }
+                                placeholder="输入回复内容..."
+                                className="min-h-[60px] text-sm flex-1"
+                              />
+                              <div className="flex flex-col gap-1">
+                                <Button
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  disabled={
+                                    !replyContents[record.id]?.trim() || uploading
+                                  }
+                                  onClick={() => handleSendReply(record.id)}
+                                >
+                                  {uploading ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Send className="w-3.5 h-3.5" />
+                                  )}
+                                </Button>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -581,7 +666,18 @@ export default function TaskEditDialog({
                               >
                                 <X className="w-3.5 h-3.5" />
                               </Button>
+                              </div>
                             </div>
+                            <AttachmentPicker
+                              files={replyFiles[record.id] ?? []}
+                              onChange={(files) =>
+                                setReplyFiles((prev) => ({
+                                  ...prev,
+                                  [record.id]: files,
+                                }))
+                              }
+                              disabled={uploading}
+                            />
                           </div>
                         )}
                       </div>
@@ -614,13 +710,24 @@ export default function TaskEditDialog({
                 placeholder="描述解决思路..."
                 className="min-h-[60px] text-sm border-l-4 border-blue-400"
               />
+              <AttachmentPicker
+                files={pendingFiles}
+                onChange={setPendingFiles}
+                disabled={uploading}
+              />
+              {uploadError && (
+                <p className="text-xs text-destructive" role="alert">
+                  {uploadError}
+                </p>
+              )}
               <Button
                 size="sm"
                 onClick={handleAddRecord}
-                disabled={!newProgress.trim()}
+                disabled={!newProgress.trim() || uploading}
                 className="w-full"
               >
-                提交记录
+                {uploading && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
+                {uploading ? "正在上传附件..." : "提交记录"}
               </Button>
             </div>
           </TabsContent>

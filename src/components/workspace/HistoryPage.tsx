@@ -31,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import AttachmentList from "@/components/AttachmentList";
 import type { Person, ProgressRecord, Task } from "@/types";
 
 export interface HistoryPageProps {
@@ -398,6 +399,9 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
                               <p className="line-clamp-2" title={value}>
                                 {value || "-"}
                               </p>
+                              {index === 0 && (
+                                <AttachmentList attachments={record.attachments} />
+                              )}
                             </TableCell>
                           )
                         )}

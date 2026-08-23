@@ -31,6 +31,16 @@ export interface ProgressReply {
   author: string;      // "杨老师" or student name
   authorId: string;    // person id
   content: string;
+  attachments?: AttachmentMeta[];
+}
+
+/** 附件元数据：文件本体存服务端 data/attachments/，仅此元数据随 state 持久化 */
+export interface AttachmentMeta {
+  id: string;
+  name: string;
+  size: number;
+  uploadedBy?: string;
+  uploadedAt?: string;
 }
 
 export interface ProgressRecord {
@@ -42,6 +52,7 @@ export interface ProgressRecord {
   mainProblems: string;
   solutions: string;
   replies: ProgressReply[];  // NEW: teacher/student can reply
+  attachments?: AttachmentMeta[];
 }
 
 export interface Task {
@@ -60,6 +71,8 @@ export interface Task {
   rating: number;
   order: number;
   isMilestone: boolean;
+  /** 仅自己可见：学生私有任务，教师端不可见（服务端过滤） */
+  isPrivate?: boolean;
   progressHistory: ProgressRecord[];
   archivedAt?: string;  // NEW: auto-archive timestamp when progress reaches 100
 }

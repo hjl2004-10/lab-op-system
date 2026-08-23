@@ -1,8 +1,9 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Plus, X } from "lucide-react";
+import { Lock, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -43,6 +44,7 @@ interface TaskForm {
   endDate: string;
   progress: number;
   description: string;
+  isPrivate: boolean;
 }
 
 interface FormErrors {
@@ -71,6 +73,7 @@ function createInitialForm(
     endDate: currentDate,
     progress: 0,
     description: "",
+    isPrivate: false,
   };
 }
 
@@ -138,6 +141,8 @@ export default function AddTaskSheet({
       endDate: form.endDate,
       progress: form.progress,
       description: form.description,
+      // 仅学生自建任务支持私有（canAssignTasks=false 时负责人锁定为自己）
+      isPrivate: !canAssignTasks ? form.isPrivate : undefined,
       detail: {
         currentProgress: "",
         mainProblems: "",
@@ -311,6 +316,27 @@ export default function AddTaskSheet({
                 className="min-h-24 resize-y"
               />
             </div>
+
+            {!canAssignTasks && (
+              <div className="space-y-1.5 rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700">
+                <Label htmlFor="add-task-private" className="flex items-center gap-1.5">
+                  <Lock className="size-3.5 text-slate-400" />
+                  仅自己可见
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="add-task-private"
+                    checked={form.isPrivate}
+                    onCheckedChange={(checked) =>
+                      setForm((previous) => ({ ...previous, isPrivate: checked }))
+                    }
+                  />
+                  <span className="text-xs text-slate-400">
+                    开启后该任务对教师不可见，仅自己可见
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <SheetFooter className="flex-row border-t border-slate-200 px-4 py-4 dark:border-slate-700 sm:justify-end sm:px-5">
