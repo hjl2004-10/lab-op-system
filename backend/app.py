@@ -34,6 +34,8 @@ ATTACHMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 DIST_DIR = BASE_DIR / "dist"
 SESSION_COOKIE = "yang11_session"
 SESSION_DAYS = 7
+# 单点登录：最近 N 分钟内有活动的会话视为"在线"，在线期间拒绝其他设备登录
+SESSION_ONLINE_MINUTES = int(os.getenv("GANTT_ONLINE_MINUTES", "30"))
 PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,128}$")
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
 
@@ -133,7 +135,8 @@ def initialize_database() -> None:
                 token_hash TEXT PRIMARY KEY,
                 person_id TEXT NOT NULL REFERENCES users(person_id) ON DELETE CASCADE,
                 expires_at TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                last_seen TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS app_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -184,6 +187,11 @@ def initialize_database() -> None:
             db.execute("ALTER TABLE users ADD COLUMN username TEXT")
         if "created_by" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN created_by TEXT")
+        session_columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "last_seen" not in session_columns:
+            db.execute("ALTER TABLE sessions ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''")
+            # 存量会话的 last_seen 以创建时间兜底（旧会话很快自然过期）
+            db.execute("UPDATE sessions SET last_seen = created_at WHERE last_seen = ''")
         db.execute("UPDATE users SET username = person_id WHERE username IS NULL OR username = ''")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE NOCASE)")
 
@@ -697,11 +705,33 @@ def sync_users(db: sqlite3.Connection, people: list[dict[str, Any]]) -> None:
             )
 
 
+_session_touch_cache: dict[str, float] = {}
+
+
+def touch_session(token_hash: str) -> None:
+    """刷新会话活跃时间（单点登录的"在线"依据；限流：每会话每 60 秒最多写一次库）"""
+    moment = time.monotonic()
+    if moment - _session_touch_cache.get(token_hash, 0.0) < 60:
+        return
+    if len(_session_touch_cache) > 10000:
+        _session_touch_cache.clear()
+    _session_touch_cache[token_hash] = moment
+    try:
+        with database() as db:
+            db.execute(
+                "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
+                (now_iso(), token_hash),
+            )
+    except sqlite3.Error:
+        pass  # 活跃时间刷新失败不影响本次请求
+
+
 async def current_user(
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> dict[str, Any]:
     if not session_token:
         raise HTTPException(status_code=401, detail="请先登录")
+    token_hash = hash_token(session_token)
     with database() as db:
         row = db.execute(
             """
@@ -709,10 +739,11 @@ async def current_user(
             JOIN users u ON u.person_id = s.person_id
             WHERE s.token_hash = ? AND s.expires_at > ?
             """,
-            (hash_token(session_token), now_iso()),
+            (token_hash, now_iso()),
         ).fetchone()
     if not row:
-        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+        raise HTTPException(status_code=401, detail="登录已过期或已在其他设备登录，请重新登录")
+    touch_session(token_hash)
     return public_user(row)
 
 
@@ -731,7 +762,11 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginRequest, response: Response) -> dict[str, Any]:
+def login(
+    payload: LoginRequest,
+    response: Response,
+    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict[str, Any]:
     with database() as db:
         row = db.execute(
             "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
@@ -739,11 +774,29 @@ def login(payload: LoginRequest, response: Response) -> dict[str, Any]:
         ).fetchone()
         if not row or not verify_password(payload.password, row["password_hash"]):
             raise HTTPException(status_code=401, detail="账号或密码错误")
+        # 单点登录：在线（最近活跃）会话存在时拒绝新登录；同一浏览器重复登录不受影响
+        now = now_iso()
+        online_cutoff = (datetime.now(UTC) - timedelta(minutes=SESSION_ONLINE_MINUTES)).isoformat()
+        current_hash = hash_token(session_token) if session_token else None
+        online_hashes = {
+            session["token_hash"]
+            for session in db.execute(
+                "SELECT token_hash FROM sessions WHERE person_id = ? AND expires_at > ? AND last_seen > ?",
+                (row["person_id"], now, online_cutoff),
+            ).fetchall()
+        }
+        if online_hashes and current_hash not in online_hashes:
+            raise HTTPException(
+                status_code=409,
+                detail="该账号已在其他设备登录，请先在那边退出登录后再换设备",
+            )
+        # 清掉本账号全部旧会话（含陈旧会话），保证同一时刻只有一个会话
+        db.execute("DELETE FROM sessions WHERE person_id = ?", (row["person_id"],))
         token = secrets.token_urlsafe(32)
         expires_at = (datetime.now(UTC) + timedelta(days=SESSION_DAYS)).isoformat()
         db.execute(
-            "INSERT INTO sessions (token_hash, person_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
-            (hash_token(token), row["person_id"], expires_at, now_iso()),
+            "INSERT INTO sessions (token_hash, person_id, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+            (hash_token(token), row["person_id"], expires_at, now, now),
         )
     response.set_cookie(
         SESSION_COOKIE,
