@@ -9,6 +9,8 @@ import {
   CloudAlert,
   GraduationCap,
   History,
+  KeyRound,
+  Loader2,
   LogOut,
   Menu,
   Moon,
@@ -18,6 +20,14 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -25,8 +35,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { api, type AuthUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { AuthUser } from "@/lib/api";
 
 interface WorkspaceShellProps {
   user: AuthUser;
@@ -45,6 +57,105 @@ const pageTitles: Record<string, string> = {
   "/system": "系统管理",
 };
 
+function PasswordDialog({
+  onOpenChange,
+}: {
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [oldPassword, setOldPassword] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  const submit = async () => {
+    if (busy) return;
+    if (!oldPassword || password.length < 8) {
+      setError("请填写完整：新密码至少 8 位且含大小写字母和数字");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("两次输入的新密码不一致");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.changeOwnPassword(oldPassword, password);
+      setDone(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "修改失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>修改密码</DialogTitle>
+          <DialogDescription>
+            修改成功后其他设备需要重新登录，当前设备保持登录
+          </DialogDescription>
+        </DialogHeader>
+        {done ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+            密码已修改。
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">旧密码</Label>
+              <Input
+                type="password"
+                value={oldPassword}
+                onChange={(event) => setOldPassword(event.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">新密码</Label>
+              <Input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="至少 8 位，含大写、小写字母和数字"
+                autoComplete="new-password"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">确认新密码</Label>
+              <Input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                autoComplete="new-password"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submit();
+                }}
+              />
+            </div>
+            {error && <p className="text-xs text-red-500">{error}</p>}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+          {!done && (
+            <Button size="sm" onClick={submit} disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+              确认修改
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function WorkspaceShell({
   user,
   syncStatus,
@@ -59,6 +170,7 @@ export default function WorkspaceShell({
     () => localStorage.getItem("workspace-sidebar-collapsed") === "true"
   );
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("workspace-sidebar-collapsed", String(collapsed));
@@ -67,11 +179,10 @@ export default function WorkspaceShell({
   const isAdminOrTeacher = user.role === "admin" || user.role === "teacher";
   const navItems = [
     { to: "/schedule", label: "任务排期", icon: CalendarDays },
-    {
-      to: "/profiles",
-      label: isAdminOrTeacher ? "学生档案" : "我的档案",
-      icon: GraduationCap,
-    },
+    // 学生端不提供档案界面（图二），档案仅教师端维护
+    ...(isAdminOrTeacher
+      ? [{ to: "/profiles", label: "学生档案", icon: GraduationCap }]
+      : []),
     { to: "/analytics", label: "数据统计", icon: BarChart3 },
     { to: "/history", label: "进展历史", icon: History },
     ...(isAdminOrTeacher
@@ -210,9 +321,15 @@ export default function WorkspaceShell({
                   {darkMode ? <Sun /> : <Moon />}
                   {darkMode ? "切换到亮色模式" : "切换到暗色模式"}
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => navigate("/profiles")}>
-                  <GraduationCap />
-                  {isAdminOrTeacher ? "学生档案" : "我的档案"}
+                {isAdminOrTeacher && (
+                  <DropdownMenuItem onSelect={() => navigate("/profiles")}>
+                    <GraduationCap />
+                    学生档案
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>
+                  <KeyRound />
+                  修改密码
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -229,6 +346,15 @@ export default function WorkspaceShell({
 
         <main className="workspace-content">{children}</main>
       </section>
+
+      {/* 关闭即卸载，表单状态自然重置 */}
+      {passwordOpen && (
+        <PasswordDialog
+          onOpenChange={(next) => {
+            if (!next) setPasswordOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

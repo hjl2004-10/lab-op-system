@@ -89,6 +89,28 @@ def database() -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
+def merge_duplicate_tasks(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """v4 迁移：合并两个同 id 任务——以记录更全的为底，进展记录与回复按 id 并集。"""
+    base, other = (
+        (a, b) if len(a.get("progressHistory", [])) >= len(b.get("progressHistory", [])) else (b, a)
+    )
+    merged = dict(base)
+    history: dict[str, dict[str, Any]] = {}
+    for record in base.get("progressHistory", []):
+        history[record.get("id", "")] = record
+    for record in other.get("progressHistory", []):
+        record_id = record.get("id", "")
+        if record_id not in history:
+            history[record_id] = record
+            continue
+        replies = {r.get("id", ""): r for r in history[record_id].get("replies", [])}
+        for reply in record.get("replies", []):
+            replies.setdefault(reply.get("id", ""), reply)
+        history[record_id] = {**history[record_id], "replies": list(replies.values())}
+    merged["progressHistory"] = list(history.values())
+    return merged
+
+
 def initialize_database() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -253,6 +275,30 @@ def initialize_database() -> None:
             )
             db.execute("DELETE FROM sessions")
 
+        if schema_version < 4:
+            # v4：合并重复 id 的任务（前端 ID 计数器未同步导致同 id 任务并存、记录翻倍）
+            state_row_v4 = db.execute("SELECT payload FROM app_state WHERE id = 1").fetchone()
+            if state_row_v4:
+                shutil.copy2(DB_PATH, DB_PATH.with_name(f"gantt.db.bak-v4-{int(time.time())}"))
+                payload_v4 = json.loads(state_row_v4["payload"])
+                deduped: dict[str, dict[str, Any]] = {}
+                for task in payload_v4.get("tasks", []):
+                    task_id = task.get("id")
+                    if task_id in deduped:
+                        deduped[task_id] = merge_duplicate_tasks(deduped[task_id], task)
+                    else:
+                        deduped[task_id] = task
+                before = len(payload_v4.get("tasks", []))
+                payload_v4["tasks"] = list(deduped.values())
+                db.execute(
+                    "UPDATE app_state SET payload = ?, updated_at = ? WHERE id = 1",
+                    (json.dumps(payload_v4, ensure_ascii=False), now_iso()),
+                )
+                print(f"[migrate v4] 合并重复任务：{before} -> {len(deduped)}", flush=True)
+            db.execute(
+                "INSERT OR REPLACE INTO system_meta (key, value) VALUES ('schema_version', '4')"
+            )
+
         state_row = db.execute("SELECT payload FROM app_state WHERE id = 1").fetchone()
         if state_row:
             state_payload = json.loads(state_row["payload"])
@@ -342,6 +388,8 @@ def public_user(row: sqlite3.Row) -> dict[str, Any]:
         "username": row["username"],
         "name": row["name"],
         "role": row["role"],
+        # 停用账户可登录进入离线模式（只读），删除后级联清会话彻底锁定
+        "active": bool(row["active"]),
     }
 
 
@@ -370,28 +418,53 @@ def user_can_see_task(task: dict[str, Any], user: dict[str, Any]) -> bool:
     return True
 
 
-def merge_hidden_tasks(
-    stored: dict[str, Any], incoming_tasks: list[dict[str, Any]], user: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """admin/teacher 保存时，其 GET 已被过滤掉看不到的任务（学生私有任务），
-    若照 incoming 全量写入会把这些任务删掉，这里从存储中补回。"""
-    incoming_ids = {task.get("id") for task in incoming_tasks}
-    hidden = [
-        task
-        for task in stored.get("tasks", [])
-        if not user_can_see_task(task, user) and task.get("id") not in incoming_ids
-    ]
-    return incoming_tasks + hidden
+def manager_person_scope(people: list[dict[str, Any]], user: dict[str, Any]) -> set[str]:
+    """成员可见范围：自己 + 自己创建的成员；admin 额外继承历史无归属的学生（p2/p3 等）。"""
+    ids = {user["personId"]}
+    for person in people:
+        creator = person.get("createdBy")
+        if creator == user["personId"]:
+            ids.add(person["id"])
+        elif user["role"] == "admin" and person.get("role") == "student" and not creator:
+            ids.add(person["id"])
+    return ids
+
+
+def manager_task_scope(people: list[dict[str, Any]], user: dict[str, Any]) -> set[str]:
+    """任务可见范围：自己 + 自己创建的学生（教师名下的任务只有本人可见，教师之间互不可见）。"""
+    ids = {user["personId"]}
+    for person in people:
+        creator = person.get("createdBy")
+        if person.get("role") == "student" and (
+            creator == user["personId"]
+            or (user["role"] == "admin" and not creator)
+        ):
+            ids.add(person["id"])
+    return ids
 
 
 def state_for_user(payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     clean = sanitize_state(payload)
     role = user["role"]
     if role in ("admin", "teacher"):
-        # admin/teacher：可管理学生/班级/任务、可看教师备注，但看不到他人私有任务
+        # 工作区按归属隔离：只看自己 + 自己创建的学生；其他教师与其学生不可见
+        everyone = clean["people"]
+        person_ids = manager_person_scope(everyone, user)
+        task_owner_ids = manager_task_scope(everyone, user)
+        student_ids = task_owner_ids - {user["personId"]}
         return {
-            **clean,
-            "tasks": [task for task in clean["tasks"] if user_can_see_task(task, user)],
+            "people": [p for p in everyone if p.get("id") in person_ids],
+            "tasks": [
+                t
+                for t in clean["tasks"]
+                if t.get("assigneeId") in task_owner_ids and user_can_see_task(t, user)
+            ],
+            "studentProfiles": [
+                p for p in clean["studentProfiles"] if p.get("personId") in student_ids
+            ],
+            # 预设字段对所有角色可见（学生/教师填档案需要用到可选项）
+            "profileFieldDefs": clean["profileFieldDefs"],
+            "classes": [c for c in clean["classes"] if c.get("teacherId") == user["personId"]],
         }
 
     # student 分支（沿用原 member 逻辑）
@@ -478,67 +551,102 @@ def teacher_can_manage(db: sqlite3.Connection, teacher_id: str, target_id: str) 
     return row["created_by"] == teacher_id
 
 
-def merge_teacher_state(
-    stored: dict[str, Any], incoming: dict[str, Any], teacher_id: str
+def merge_manager_state(
+    stored: dict[str, Any],
+    incoming: dict[str, Any],
+    user: dict[str, Any],
+    admin_fields: bool,
 ) -> dict[str, Any]:
-    """老师保存 state：只接受自己创建的学生与自己创建的班级，
-    其他 admin/老师/他人学生的数据原样保留，防提权、防越权。"""
+    """admin/teacher 统一的 scoped 保存合并：只接受自己范围内的数据，
+    范围外（其他教师与其学生、学生私有任务）原样保留，防越权、防误删。"""
+    user_id = user["personId"]
+    is_admin = user["role"] == "admin"
     stored_people = stored.get("people", [])
     incoming_people = incoming.get("people", [])
-    incoming_by_id = {p.get("id"): p for p in incoming_people}
-    manageable = {
-        p.get("id")
-        for p in stored_people + incoming_people
-        if p.get("role") == "student" and p.get("createdBy") == teacher_id
-    }
+    scope_ids = manager_person_scope(stored_people + incoming_people, user)
+    task_owner_ids = manager_task_scope(stored_people + incoming_people, user)
 
+    # people：范围内以 incoming 为准（保护 id/role/createdBy/username/配色），缺失=删除；
+    # 范围外原样保留；范围内新增的成员 createdBy/role 由服务端裁定
+    incoming_by_id = {p.get("id"): p for p in incoming_people}
+    stored_ids = {p.get("id") for p in stored_people}
     people: list[dict[str, Any]] = []
+    protected = {"id", "role", "createdBy", "username", "color", "lightColor", "borderColor", "textColor"}
     for person in stored_people:
         pid = person.get("id")
-        if pid in manageable:
-            inc = incoming_by_id.get(pid)
-            if inc is None:
-                continue  # 老师删除了该学生
-            merged = dict(person)
-            protected = {
-                "id", "role", "createdBy", "username",
-                "color", "lightColor", "borderColor", "textColor",
-            }
-            for key, value in inc.items():
-                if key in protected:
-                    continue
+        if pid not in scope_ids:
+            people.append(person)  # 他人数据
+            continue
+        inc = incoming_by_id.get(pid)
+        if inc is None:
+            continue  # 用户删除了该成员
+        merged = dict(person)
+        for key, value in inc.items():
+            if key not in protected:
                 merged[key] = value
-            merged["role"] = "student"  # 强制，防提权
-            if person.get("createdBy"):
-                merged["createdBy"] = person["createdBy"]
-            people.append(merged)
-        else:
-            people.append(person)  # 保留他人数据
+        people.append(merged)
+    for pid, inc in incoming_by_id.items():
+        if pid in stored_ids or pid not in scope_ids:
+            continue
+        new_person = dict(inc)
+        new_person["createdBy"] = user_id  # 归属由服务端裁定
+        # 自己的条目保持原角色；老师新建的成员只能是学生（admin 可建教师）；防提权
+        allowed_roles = {"student", "teacher", "admin"} if is_admin else {"student"}
+        if pid != user_id and new_person.get("role") not in allowed_roles:
+            new_person["role"] = "student"
+        people.append(new_person)
+
+    # tasks：范围内以 incoming 为准（支持删除），学生私有任务保留，范围外不动
+    incoming_tasks = incoming.get("tasks", [])
+    for task in incoming_tasks:
+        if task.get("assigneeId") not in task_owner_ids:
+            raise HTTPException(status_code=403, detail="任务负责人超出你的管理范围")
+    incoming_task_ids = {t.get("id") for t in incoming_tasks}
+    tasks: list[dict[str, Any]] = []
+    for task in stored.get("tasks", []):
+        if task.get("assigneeId") not in task_owner_ids:
+            tasks.append(task)  # 他人数据
+        elif task.get("id") in incoming_task_ids:
+            continue  # 由 incoming 覆盖
+        elif not user_can_see_task(task, user):
+            tasks.append(task)  # 学生私有任务：看不见但不可删
+        # 范围内可见但 incoming 没有 = 用户已删除 → 丢弃
+    tasks.extend(incoming_tasks)
 
     # classes：自己的班以 incoming 为准（含删除），他人班级原样保留
-    classes = [c for c in stored.get("classes", []) if c.get("teacherId") != teacher_id]
-    classes += [c for c in incoming.get("classes", []) if c.get("teacherId") == teacher_id]
+    classes = [c for c in stored.get("classes", []) if c.get("teacherId") != user_id]
+    classes += [c for c in incoming.get("classes", []) if c.get("teacherId") == user_id]
 
-    # studentProfiles：只接受可管理学生的档案
+    # studentProfiles：只接受范围内学生的档案（缺失=删除），他人档案保留
+    scope_students = task_owner_ids - {user_id}
     incoming_profiles = {p.get("personId"): p for p in incoming.get("studentProfiles", [])}
-    stored_profiles = stored.get("studentProfiles", [])
-    stored_profile_ids = {p.get("personId") for p in stored_profiles}
-    profiles = [
-        incoming_profiles.get(p.get("personId"), p)
-        for p in stored_profiles
-        if p.get("personId") not in manageable or p.get("personId") in incoming_profiles
-    ]
-    for pid, profile in incoming_profiles.items():
-        if pid in manageable and pid not in stored_profile_ids:
-            profiles.append(profile)
+    kept_profile_ids = set()
+    profiles: list[dict[str, Any]] = []
+    for profile in stored.get("studentProfiles", []):
+        pid = profile.get("personId")
+        if pid in scope_students:
+            inc = incoming_profiles.get(pid)
+            if inc is not None:
+                profiles.append(inc)
+                kept_profile_ids.add(pid)
+            # incoming 没有 = 用户删除了该学生（档案随成员一起删）
+        else:
+            profiles.append(profile)  # 他人学生的档案
+    for pid, inc in incoming_profiles.items():
+        if pid in scope_students and pid not in kept_profile_ids:
+            profiles.append(inc)
 
     return {
         "people": people,
-        # 老师任务权限等同 admin（可改可删），但要保留自己看不到的学生私有任务
-        "tasks": merge_hidden_tasks(stored, incoming.get("tasks", []), {"role": "teacher", "personId": teacher_id}),
+        "tasks": tasks,
         "classes": classes,
         "studentProfiles": profiles,
-        "profileFieldDefs": stored.get("profileFieldDefs", []),  # 老师只读预设字段
+        # 预设字段：admin 可写，teacher 只读（永远保留服务端定义，防篡改）
+        "profileFieldDefs": (
+            incoming.get("profileFieldDefs", [])
+            if admin_fields
+            else stored.get("profileFieldDefs", [])
+        ),
     }
 
 
@@ -599,7 +707,7 @@ async def current_user(
             """
             SELECT u.* FROM sessions s
             JOIN users u ON u.person_id = s.person_id
-            WHERE s.token_hash = ? AND s.expires_at > ? AND u.active = 1
+            WHERE s.token_hash = ? AND s.expires_at > ?
             """,
             (hash_token(session_token), now_iso()),
         ).fetchone()
@@ -626,7 +734,7 @@ def health() -> dict[str, str]:
 def login(payload: LoginRequest, response: Response) -> dict[str, Any]:
     with database() as db:
         row = db.execute(
-            "SELECT * FROM users WHERE username = ? COLLATE NOCASE AND active = 1",
+            "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
             (payload.username,),
         ).fetchone()
         if not row or not verify_password(payload.password, row["password_hash"]):
@@ -660,7 +768,7 @@ def me(
             """
             SELECT u.* FROM sessions s
             JOIN users u ON u.person_id = s.person_id
-            WHERE s.token_hash = ? AND s.expires_at > ? AND u.active = 1
+            WHERE s.token_hash = ? AND s.expires_at > ?
             """,
             (hash_token(session_token), now_iso()),
         ).fetchone()
@@ -677,6 +785,41 @@ def logout(
     response = JSONResponse({"ok": True})
     response.delete_cookie(SESSION_COOKIE, path="/")
     return response
+
+
+class OwnPasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+
+@app.put("/api/auth/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_own_password(
+    payload: OwnPasswordRequest,
+    user: dict[str, Any] = Depends(current_user),
+    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> Response:
+    """自助修改密码：校验旧密码，更新后注销其他会话、保留当前会话。"""
+    with database() as db:
+        row = db.execute(
+            "SELECT password_hash FROM users WHERE person_id = ?", (user["personId"],)
+        ).fetchone()
+        if not row or not verify_password(payload.old_password, row["password_hash"]):
+            raise HTTPException(status_code=403, detail="旧密码不正确")
+        db.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE person_id = ?",
+            (hash_password(payload.password), now_iso(), user["personId"]),
+        )
+        if session_token:
+            db.execute(
+                "DELETE FROM sessions WHERE person_id = ? AND token_hash != ?",
+                (user["personId"], hash_token(session_token)),
+            )
+    return Response(status_code=204)
 
 
 @app.post("/api/users", status_code=status.HTTP_201_CREATED)
@@ -1199,6 +1342,8 @@ def list_ai_messages(
 async def send_ai_chat(
     payload: AiChatRequest, user: dict[str, Any] = Depends(current_user)
 ) -> dict[str, Any]:
+    if not user.get("active", True):
+        raise HTTPException(status_code=403, detail="账号已停用，AI 功能不可用")
     if not CLAUDE_CLI:
         raise HTTPException(status_code=400, detail="服务器未安装 Claude Code CLI")
     settings = read_ai_settings()
@@ -1381,23 +1526,20 @@ def save_state(
     payload: StatePayload,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
+    if not user.get("active", True):
+        raise HTTPException(status_code=403, detail="账号已停用，仅可离线查看，修改不会保存")
     incoming = sanitize_state(payload.model_dump())
     with database() as db:
         row = db.execute("SELECT * FROM app_state WHERE id = 1").fetchone()
         if not row and user["role"] not in ("admin", "teacher"):
             raise HTTPException(status_code=403, detail="请先由教师初始化系统")
 
-        if user["role"] == "admin":
-            next_state = incoming
-            # admin 的 GET 也看不到学生私有任务，全量覆盖前补回，防止误删
-            if row:
-                stored = json.loads(row["payload"])
-                next_state["tasks"] = merge_hidden_tasks(stored, incoming["tasks"], user)
-            sync_users(db, next_state["people"])
-        elif user["role"] == "teacher":
-            stored = json.loads(row["payload"])
-            next_state = merge_teacher_state(stored, incoming, user["personId"])
-            # 防注入：incoming 新增的学生必须已存在于 users 表（老师通过 create_user 建的）
+        if user["role"] in ("admin", "teacher"):
+            stored = json.loads(row["payload"]) if row else {"people": [], "tasks": [], "studentProfiles": [], "profileFieldDefs": [], "classes": []}
+            next_state = merge_manager_state(
+                stored, incoming, user, admin_fields=(user["role"] == "admin")
+            )
+            # 防注入：合并结果中的成员必须已存在于 users 表（通过 create_user 建的）
             existing_ids = {
                 r["person_id"] for r in db.execute("SELECT person_id FROM users").fetchall()
             }

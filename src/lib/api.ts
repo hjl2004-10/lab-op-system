@@ -5,6 +5,8 @@ export interface AuthUser {
   username: string;
   name: string;
   role: Role;
+  /** false = 账号已停用（离线模式：可登录查看，修改不会保存） */
+  active?: boolean;
 }
 
 export interface RemoteState {
@@ -58,6 +60,11 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+  changeOwnPassword: (oldPassword: string, password: string) =>
+    request<void>("/api/auth/password", {
+      method: "PUT",
+      body: JSON.stringify({ old_password: oldPassword, password }),
+    }),
   getState: () =>
     request<{ state: RemoteState | null; revision: number; updatedAt: string | null }>("/api/state"),
   saveState: (state: RemoteState) =>

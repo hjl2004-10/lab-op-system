@@ -395,8 +395,8 @@
 .workspace-user-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
 .workspace-user-copy strong { max-width: 100px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; white-space: nowrap; }
 .workspace-user-copy small { color: #94a3b8; font-size: 11px; }
-.workspace-content { min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
-.workspace-content > main { height: 100%; overflow: auto; }
+.workspace-content { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.workspace-content > main { flex: 1; min-height: 0; overflow: auto; }
 .workspace-section-loader { min-height: 100%; }
 
 /* ===== 甘特图（zip 平面规格：48px 行体系、slate 边框） ===== */

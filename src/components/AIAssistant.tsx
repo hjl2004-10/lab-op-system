@@ -167,7 +167,6 @@ export default function AIAssistant({
       // 记忆窗口已保存过位置：仅做边界钳制
       setWindowBox((box) => clampBox(box));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isMobile]);
 
   useEffect(() => {

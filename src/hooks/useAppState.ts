@@ -7,7 +7,7 @@ import {
   encodeSyncData,
   decodeSyncData,
 } from "@/utils";
-import { api, type AuthUser, type RemoteState } from "@/lib/api";
+import { api, ApiError, type AuthUser, type RemoteState } from "@/lib/api";
 import { isProtectedFieldKey } from "@/lib/profileFields";
 
 let nextTaskId = 100;
@@ -21,6 +21,22 @@ function generateTaskId(): string {
 function generateProgressId(): string {
   nextProgressId++;
   return `ph${nextProgressId}`;
+}
+
+/** 水合后同步 ID 计数器到已有最大号，避免新建任务/记录撞出重复 id */
+function syncIdCounters(tasks: Task[]): void {
+  let maxTask = nextTaskId;
+  let maxProgress = nextProgressId;
+  for (const task of tasks) {
+    const match = /^t(\d+)$/.exec(task.id);
+    if (match) maxTask = Math.max(maxTask, Number(match[1]));
+    for (const record of task.progressHistory ?? []) {
+      const progressMatch = /^ph(\d+)$/.exec(record.id);
+      if (progressMatch) maxProgress = Math.max(maxProgress, Number(progressMatch[1]));
+    }
+  }
+  nextTaskId = maxTask;
+  nextProgressId = maxProgress;
 }
 
 // ============================================================
@@ -39,6 +55,8 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [syncStatus, setSyncStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // 账号停用 → 离线模式：可查看，保存被拦截
+  const [accountDisabled, setAccountDisabled] = useState(authUser?.active === false);
   const hydratedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -61,8 +79,33 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     hydratedRef.current = false;
 
     const applyState = (state: RemoteState) => {
-      setPeople(state.people);
+      let people = state.people;
+      // 管理者自身不在成员表时自动补一条（保证能建自己的任务、出现在负责人列表）
+      if (
+        (authUser.role === "admin" || authUser.role === "teacher") &&
+        !people.some((p) => p.id === authUser.personId)
+      ) {
+        const colors = getColorForIndex(people.filter((p) => p.status !== "archived").length);
+        people = [
+          ...people,
+          {
+            id: authUser.personId,
+            username: authUser.username,
+            name: authUser.name,
+            color: colors.color,
+            lightColor: colors.lightColor,
+            borderColor: colors.borderColor,
+            textColor: "#FFFFFF",
+            role: authUser.role,
+            order: people.length,
+            status: "active",
+            classIds: [],
+          },
+        ];
+      }
+      setPeople(people);
       setTasks(state.tasks);
+      syncIdCounters(state.tasks);
       setStudentProfiles(state.studentProfiles || []);
       setClasses(state.classes || []);
       // 服务端无预设字段（旧库）时兜底播种默认预设
@@ -110,7 +153,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   }, [authUser]);
 
   useEffect(() => {
-    if (!authUser || !hydratedRef.current || loadError || !autoSave) {
+    if (!authUser || !hydratedRef.current || loadError || !autoSave || accountDisabled) {
       return;
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -118,15 +161,23 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
       setSyncStatus("saving");
       api.saveState({ people, tasks, studentProfiles, profileFieldDefs, classes })
         .then(() => setSyncStatus("saved"))
-        .catch((error) => {
+        .catch((error: unknown) => {
           console.error("Unable to save workspace", error);
+          if (
+            error instanceof ApiError &&
+            error.status === 403 &&
+            error.message.includes("停用")
+          ) {
+            // 管理员刚停用了本账号：切换到离线模式（只读）
+            setAccountDisabled(true);
+          }
           setSyncStatus("error");
         });
     }, 650);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [authUser, people, tasks, studentProfiles, profileFieldDefs, classes, loadError, autoSave]);
+  }, [authUser, people, tasks, studentProfiles, profileFieldDefs, classes, loadError, autoSave, accountDisabled]);
 
   // -- 管理员/老师勾选学生（主页学生专属卡片，跨任务/表格共享）--
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
@@ -1088,6 +1139,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     manageableStudentIds,
     loading,
     loadError,
+    accountDisabled,
     syncStatus,
     flushSave,
 

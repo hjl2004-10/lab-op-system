@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { format, parseISO, subDays } from "date-fns";
 import {
   ArrowDown,
@@ -84,7 +84,7 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
   const [startDate, setStartDate] = useState(inputDate(subDays(new Date(), 30)));
   const [endDate, setEndDate] = useState(inputDate(new Date()));
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortField, setSortField] = useState<SortField>("taskName");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const activeMembers = useMemo(
@@ -138,21 +138,34 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
 
   const sortedRecords = useMemo(() => {
     const records = [...flatRecords];
+    const direction = sortDirection === "asc" ? 1 : -1;
     records.sort((left, right) => {
-      const leftValue =
-        sortField === "date" ? dateValue(left.date) : String(left[sortField] || "");
-      const rightValue =
-        sortField === "date"
-          ? dateValue(right.date)
-          : String(right[sortField] || "");
-      const comparison =
-        typeof leftValue === "number" && typeof rightValue === "number"
-          ? leftValue - rightValue
-          : String(leftValue).localeCompare(String(rightValue));
-      return sortDirection === "asc" ? comparison : -comparison;
+      let comparison: number;
+      if (sortField === "date") {
+        comparison = dateValue(left.date) - dateValue(right.date);
+      } else {
+        comparison = String(left[sortField] || "").localeCompare(
+          String(right[sortField] || "")
+        );
+        if (comparison === 0) {
+          // 同一任务（或同值）内：新记录在前
+          comparison = dateValue(right.date) - dateValue(left.date);
+        }
+      }
+      return comparison * direction;
     });
     return records;
   }, [flatRecords, sortDirection, sortField]);
+
+  // 按任务分组时的每组记录数
+  const recordCountByTask = useMemo(() => {
+    const counts: Record<string, number> = {};
+    flatRecords.forEach((record) => {
+      counts[record.taskId] = (counts[record.taskId] ?? 0) + 1;
+    });
+    return counts;
+  }, [flatRecords]);
+  const grouped = sortField === "taskName";
 
   const dateColumns = useMemo(() => {
     const explicitStart = dateValue(startDate);
@@ -362,50 +375,78 @@ export default function HistoryPage({ tasks, people, isAdmin }: HistoryPageProps
               </TableHeader>
               <TableBody>
                 {sortedRecords.length ? (
-                  sortedRecords.map((record) => {
+                  sortedRecords.map((record, index) => {
                     const assignee = people.find(
                       (person) => person.id === record.assigneeId
                     );
+                    const showGroupHeader =
+                      grouped &&
+                      (index === 0 ||
+                        sortedRecords[index - 1].taskId !== record.taskId);
                     return (
-                      <TableRow key={`${record.taskId}-${record.id}`}>
-                        <TableCell className="whitespace-nowrap text-xs text-slate-500">
-                          {displayDate(record.date)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-xs font-medium">
-                          {record.author}
-                        </TableCell>
-                        <TableCell className="max-w-48 text-xs">
-                          <span className="flex items-center gap-2">
-                            <span
-                              className="size-2 shrink-0 rounded-full"
-                              style={{ backgroundColor: record.color }}
-                            />
-                            <span className="truncate" title={record.taskName}>
-                              {record.taskName}
-                            </span>
-                          </span>
-                        </TableCell>
-                        {isAdmin && (
-                          <TableCell className="whitespace-nowrap text-xs">
-                            {assignee?.name || "未知"}
-                          </TableCell>
-                        )}
-                        {[record.currentProgress, record.mainProblems, record.solutions].map(
-                          (value, index) => (
+                      <Fragment key={`${record.taskId}-${record.id}`}>
+                        {showGroupHeader && (
+                          <TableRow className="bg-slate-50 hover:bg-slate-50 dark:bg-slate-900/70">
                             <TableCell
-                              key={index}
-                              className="max-w-56 text-xs text-slate-600 dark:text-slate-300"
+                              colSpan={isAdmin ? 7 : 6}
+                              className="py-1.5 text-xs font-semibold"
                             >
-                              <p className="line-clamp-2" title={value}>
-                                {value || "-"}
-                              </p>
-                              {index === 0 && (
-                                <AttachmentList attachments={record.attachments} />
-                              )}
+                              <span className="flex items-center gap-2">
+                                <span
+                                  className="size-2.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: record.color }}
+                                />
+                                <span className="truncate">{record.taskName}</span>
+                                <span className="font-normal text-slate-400">
+                                  {assignee?.name || "未知"} ·{" "}
+                                  {recordCountByTask[record.taskId] ?? 1} 条
+                                </span>
+                              </span>
                             </TableCell>
-                          )
+                          </TableRow>
                         )}
-                      </TableRow>
+                        <TableRow>
+                          <TableCell className="whitespace-nowrap text-xs text-slate-500">
+                            {displayDate(record.date)}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-xs font-medium">
+                            {record.author}
+                          </TableCell>
+                          <TableCell className="max-w-48 text-xs">
+                            <span className="flex items-center gap-2">
+                              <span
+                                className="size-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: record.color }}
+                              />
+                              {!grouped && (
+                                <span className="truncate" title={record.taskName}>
+                                  {record.taskName}
+                                </span>
+                              )}
+                            </span>
+                          </TableCell>
+                          {isAdmin && (
+                            <TableCell className="whitespace-nowrap text-xs">
+                              {assignee?.name || "未知"}
+                            </TableCell>
+                          )}
+                          {[record.currentProgress, record.mainProblems, record.solutions].map(
+                            (value, valueIndex) => (
+                              <TableCell
+                                key={valueIndex}
+                                className="max-w-56 text-xs text-slate-600 dark:text-slate-300"
+                              >
+                                <p className="line-clamp-2" title={value}>
+                                  {value || "-"}
+                                </p>
+                                {valueIndex === 0 && (
+                                  <AttachmentList attachments={record.attachments} />
+                                )}
+                              </TableCell>
+                            )
+                          )}
+                        </TableRow>
+                      </Fragment>
                     );
                   })
                 ) : (

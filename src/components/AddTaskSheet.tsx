@@ -61,8 +61,9 @@ function createInitialForm(
   canAssignTasks: boolean,
   currentUserId: string | null
 ): TaskForm {
+  // 管理者新建任务默认负责人 = 自己（避免误落到学生名下），可手动改选
   const initialAssigneeId = canAssignTasks
-    ? people.find((person) => person.status === "active")?.id ?? ""
+    ? currentUserId ?? people.find((person) => person.status === "active")?.id ?? ""
     : currentUserId ?? "";
   const currentDate = today();
 
@@ -88,7 +89,12 @@ export default function AddTaskSheet({
   const availableAssignees = useMemo(
     () =>
       canAssignTasks
-        ? people.filter((person) => person.status === "active")
+        ? // 负责人 = 自己 + 名下学生（教师之间不互派任务）
+          people.filter(
+            (person) =>
+              person.status === "active" &&
+              (person.id === currentUserId || person.role === "student")
+          )
         : people.filter((person) => person.id === currentUserId),
     [currentUserId, canAssignTasks, people]
   );

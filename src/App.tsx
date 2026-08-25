@@ -110,6 +110,12 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
       onToggleDarkMode={() => state.setDarkMode(!state.darkMode)}
       onLogout={handleLogout}
     >
+      {state.accountDisabled && (
+        <div className="flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+          <CloudAlert className="size-4" />
+          账号已停用（离线模式）：可继续查看，修改不会保存；如需恢复请联系管理员启用
+        </div>
+      )}
       <Suspense
         fallback={
           <div className="workspace-loader workspace-section-loader">
@@ -143,25 +149,29 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
         <Route
           path="/profiles"
           element={
-            <ProfilesPage
-              people={state.people}
-              profiles={state.studentProfiles || []}
-              isAdmin={isAdmin}
-              isManager={isManager}
-              currentUserId={currentUserId}
-              selectedStudentIds={state.selectedStudentIds}
-              onSelectedStudentIdsChange={state.setSelectedStudentIds}
-              profileFieldDefs={state.profileFieldDefs}
-              onUpdateProfile={state.updateProfile}
-              onUpdateProfileAdminData={state.updateProfileAdminData}
-              onReorderProfileFields={state.reorderProfileFields}
-              onAddCategory={state.addProfileCategory}
-              onRemoveField={state.removeProfileField}
-              addProfileFieldDef={state.addProfileFieldDef}
-              removeProfileFieldDef={state.removeProfileFieldDef}
-              addProfileFieldOption={state.addProfileFieldOption}
-              removeProfileFieldOption={state.removeProfileFieldOption}
-            />
+            isManager ? (
+              <ProfilesPage
+                people={state.people}
+                profiles={state.studentProfiles || []}
+                isAdmin={isAdmin}
+                isManager={isManager}
+                currentUserId={currentUserId}
+                selectedStudentIds={state.selectedStudentIds}
+                onSelectedStudentIdsChange={state.setSelectedStudentIds}
+                profileFieldDefs={state.profileFieldDefs}
+                onUpdateProfile={state.updateProfile}
+                onUpdateProfileAdminData={state.updateProfileAdminData}
+                onReorderProfileFields={state.reorderProfileFields}
+                onAddCategory={state.addProfileCategory}
+                onRemoveField={state.removeProfileField}
+                addProfileFieldDef={state.addProfileFieldDef}
+                removeProfileFieldDef={state.removeProfileFieldDef}
+                addProfileFieldOption={state.addProfileFieldOption}
+                removeProfileFieldOption={state.removeProfileFieldOption}
+              />
+            ) : (
+              <Navigate to="/schedule" replace />
+            )
           }
         />
         <Route
