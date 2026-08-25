@@ -3,6 +3,7 @@ import {
   Bot,
   FileSpreadsheet,
   Loader2,
+  Minus,
   Paperclip,
   Plus,
   Send,
@@ -10,14 +11,8 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   api,
   readAiStream,
@@ -76,6 +71,16 @@ interface TextFile {
 
 const today = () => new Date().toISOString().split("T")[0];
 
+/** 悬浮窗位置/尺寸钳制在视口内 */
+function clampBox(box: { x: number; y: number; w: number; h: number }) {
+  return {
+    w: Math.min(Math.max(320, box.w), Math.max(340, window.innerWidth - 24)),
+    h: Math.min(Math.max(360, box.h), Math.max(380, window.innerHeight - 24)),
+    x: Math.min(Math.max(8, box.x), Math.max(8, window.innerWidth - 80)),
+    y: Math.min(Math.max(8, box.y), Math.max(8, window.innerHeight - 80)),
+  };
+}
+
 /** 从 AI 回复中提取最外层 JSON 对象或数组（剥 code fence） */
 function extractJson<T>(text: string): T | null {
   const stripped = text.replace(/```(?:json)?/g, "").replace(/```/g, "");
@@ -126,6 +131,93 @@ export default function AIAssistant({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const usable = status?.available && status?.enabled;
+
+  // ---- 悬浮窗：可拖动（标题栏）/可缩放（右下角），位置尺寸记忆 ----
+  const isMobile = useIsMobile();
+  const [windowBox, setWindowBox] = useState<{ x: number; y: number; w: number; h: number }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("gantt-ai-window") || "null");
+      if (saved && saved.x != null && saved.y != null && saved.w && saved.h) return saved;
+    } catch {
+      // 本地存储损坏时回落默认值
+    }
+    return { x: 0, y: 0, w: 400, h: 560 };
+  });
+  const windowBoxRef = useRef(windowBox);
+  useEffect(() => {
+    windowBoxRef.current = windowBox;
+  }, [windowBox]);
+  const placedRef = useRef(false);
+  const dragRef = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
+  const resizeRef = useRef<{ px: number; py: number; ow: number; oh: number } | null>(null);
+
+  useEffect(() => {
+    if (!open || isMobile) return;
+    if (!placedRef.current) {
+      // 首次打开贴右下角（悬浮球上方）
+      placedRef.current = true;
+      const { w, h } = windowBoxRef.current;
+      setWindowBox({
+        w,
+        h,
+        x: Math.max(8, window.innerWidth - w - 24),
+        y: Math.max(8, window.innerHeight - h - 88),
+      });
+    } else {
+      // 记忆窗口已保存过位置：仅做边界钳制
+      setWindowBox((box) => clampBox(box));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isMobile]);
+
+  useEffect(() => {
+    localStorage.setItem("gantt-ai-window", JSON.stringify(windowBox));
+  }, [windowBox]);
+
+  const onHeaderPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    if ((event.target as HTMLElement).closest("button, select, input")) return;
+    dragRef.current = {
+      px: event.clientX,
+      py: event.clientY,
+      ox: windowBoxRef.current.x,
+      oy: windowBoxRef.current.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onHeaderPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    setWindowBox((box) =>
+      clampBox({ ...box, x: drag.ox + event.clientX - drag.px, y: drag.oy + event.clientY - drag.py })
+    );
+  };
+  const endDrag = () => {
+    dragRef.current = null;
+  };
+  const onResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    resizeRef.current = {
+      px: event.clientX,
+      py: event.clientY,
+      ow: windowBoxRef.current.w,
+      oh: windowBoxRef.current.h,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onResizePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const resize = resizeRef.current;
+    if (!resize) return;
+    setWindowBox((box) =>
+      clampBox({
+        ...box,
+        w: resize.ow + event.clientX - resize.px,
+        h: resize.oh + event.clientY - resize.py,
+      })
+    );
+  };
+  const endResize = () => {
+    resizeRef.current = null;
+  };
 
   useEffect(() => {
     api.getAiStatus().then(setStatus).catch(() => setStatus(null));
@@ -452,11 +544,11 @@ export default function AIAssistant({
 
   return (
     <>
-      {/* 悬浮球 */}
+      {/* 悬浮球（点击开/关悬浮窗） */}
       <button
         type="button"
-        onClick={openDrawer}
-        aria-label="打开 AI 助手"
+        onClick={() => (open ? setOpen(false) : openDrawer())}
+        aria-label={open ? "收起 AI 助手" : "打开 AI 助手"}
         className={cn(
           "fixed bottom-5 right-5 z-50 flex size-12 items-center justify-center",
           "rounded-full bg-slate-800 text-white shadow-lg transition-colors",
@@ -469,15 +561,28 @@ export default function AIAssistant({
         )}
       </button>
 
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent
-          side="right"
-          className="flex w-full max-w-none flex-col gap-0 p-0 sm:w-[460px]"
+      {/* 悬浮窗 */}
+      {open && (
+        <div
+          role="dialog"
+          aria-label="AI 助手"
+          className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          style={
+            isMobile
+              ? { left: 8, right: 8, top: 72, bottom: 8 }
+              : { left: windowBox.x, top: windowBox.y, width: windowBox.w, height: windowBox.h }
+          }
         >
-          <SheetHeader className="border-b border-slate-200 px-4 py-3 pr-12 dark:border-slate-700">
-            <SheetTitle className="flex items-center gap-2 text-base">
+          <div
+            className="border-b border-slate-200 px-4 py-3 dark:border-slate-700"
+            onPointerDown={onHeaderPointerDown}
+            onPointerMove={onHeaderPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+          >
+            <div className="flex items-center gap-2 text-base font-semibold">
               <Bot className="size-4 text-sky-500" />
-              AI 助手
+              <span className="select-none">AI 助手</span>
               {status && (
                 <span
                   className={cn(
@@ -492,11 +597,28 @@ export default function AIAssistant({
                     : "服务器未安装 Claude Code"}
                 </span>
               )}
-            </SheetTitle>
-            <SheetDescription className="sr-only">
-              与 AI 对话、快速创建任务或批量导入学生账号
-            </SheetDescription>
-            <div className="flex items-center gap-2 pt-1">
+              <div className="ml-auto flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+                  aria-label="最小化"
+                  title="最小化为悬浮球"
+                >
+                  <Minus className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
+                  aria-label="关闭"
+                  title="关闭"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-2">
               <select
                 value={currentId ?? ""}
                 onChange={(event) => event.target.value && selectConversation(event.target.value)}
@@ -524,7 +646,7 @@ export default function AIAssistant({
                 <Trash2 className="size-3.5" />
               </Button>
             </div>
-          </SheetHeader>
+          </div>
 
           {/* 模式切换 */}
           <div className="flex border-b border-slate-200 dark:border-slate-700">
@@ -815,8 +937,25 @@ export default function AIAssistant({
               </Button>
             </div>
           </div>
-        </SheetContent>
-      </Sheet>
+
+          {/* 缩放手柄（桌面端） */}
+          {!isMobile && (
+            <div
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={endResize}
+              onPointerCancel={endResize}
+              className="absolute bottom-0 right-0 size-4 cursor-nwse-resize"
+              title="拖动调整窗口大小"
+              aria-label="调整窗口大小"
+            >
+              <svg viewBox="0 0 16 16" className="size-full text-slate-300 dark:text-slate-600">
+                <path d="M14 6 L6 14 M14 10 L10 14" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
