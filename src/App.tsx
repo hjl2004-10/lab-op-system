@@ -8,6 +8,7 @@ import type { Task } from "@/types";
 
 import LoginPage from "@/components/LoginPage";
 import AddTaskSheet from "@/components/AddTaskSheet";
+import AIAssistant from "@/components/AIAssistant";
 import TaskEditDialog from "@/components/TaskEditDialog";
 import SyncPanel from "@/components/SyncPanel";
 import WorkspaceShell from "@/components/workspace/WorkspaceShell";
@@ -275,6 +276,16 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
         currentUserId={currentUserId}
         currentUserRole={user.role}
         onImport={state.importData}
+      />
+
+      <AIAssistant
+        people={state.people}
+        currentUserId={currentUserId}
+        currentUserName={currentUserName}
+        currentUserRole={user.role}
+        isManager={isManager}
+        onAddTask={state.addTask}
+        onAddAccount={state.addPerson}
       />
     </WorkspaceShell>
   );

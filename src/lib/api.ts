@@ -114,7 +114,135 @@ export const api = {
     }
     return response.json() as Promise<AttachmentMeta>;
   },
+  getAiStatus: () => request<AiStatus>("/api/ai/status"),
+  getAiSettings: () => request<AiSettings>("/api/ai/settings"),
+  saveAiSettings: (settings: { enabled: boolean; model: string }) =>
+    request<{ ok: true }>("/api/ai/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
+  listAiConversations: () =>
+    request<{ conversations: AiConversation[] }>("/api/ai/conversations"),
+  createAiConversation: (title?: string) =>
+    request<{ id: string; title: string }>("/api/ai/conversations", {
+      method: "POST",
+      body: JSON.stringify({ title: title ?? "" }),
+    }),
+  deleteAiConversation: (conversationId: string) =>
+    request<void>(`/api/ai/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+    }),
+  listAiMessages: (conversationId: string) =>
+    request<{ messages: AiMessage[] }>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/messages`
+    ),
+  sendAiChat: (conversationId: string, content: string) =>
+    request<{ assistantMessageId: number }>("/api/ai/chat", {
+      method: "POST",
+      body: JSON.stringify({ conversation_id: conversationId, content }),
+    }),
+  aiFileText: (file: File) => uploadForText("/api/ai/file-text", file),
 };
 
 /** 附件下载地址（cookie 会话自动携带） */
 export const attachmentUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
+
+// ===================== AI 助手 =====================
+
+export interface AiStatus {
+  available: boolean;
+  enabled: boolean;
+}
+
+export interface AiSettings {
+  enabled: boolean;
+  model: string;
+  available: boolean;
+}
+
+export interface AiConversation {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
+export interface AiMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  state: "pending" | "done" | "error";
+  createdAt: string;
+}
+
+export interface AiStreamEvent {
+  seq: number;
+  type: "delta" | "done" | "error";
+  text?: string;
+  message?: string;
+}
+
+async function uploadForText(path: string, file: File): Promise<{ name: string; text: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(path, { method: "POST", credentials: "include", body: form });
+  if (!response.ok) {
+    let message = "文件处理失败";
+    try {
+      const body = await response.json();
+      if (typeof body.detail === "string") message = body.detail;
+    } catch {
+      // 服务器未返回 JSON 时保留通用提示
+    }
+    throw new ApiError(response.status, message);
+  }
+  return response.json();
+}
+
+/**
+ * 读取 AI 回复的 SSE 流。返回前通过 onEvent 逐事件回调；
+ * 流正常结束（done/error 事件）时 resolve，异常中断时 reject。
+ */
+export async function readAiStream(
+  messageId: number,
+  fromSeq: number,
+  onEvent: (event: AiStreamEvent) => void
+): Promise<void> {
+  const response = await fetch(
+    `/api/ai/stream/${messageId}?from=${fromSeq}`,
+    { credentials: "include" }
+  );
+  if (!response.ok || !response.body) {
+    let message = "AI 连接失败";
+    try {
+      const body = await response.json();
+      if (typeof body.detail === "string") message = body.detail;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(response.status, message);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+  while (!finished) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index = buffer.indexOf("\n\n");
+    while (index >= 0) {
+      const block = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      index = buffer.indexOf("\n\n");
+      for (const line of block.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const event = JSON.parse(line.slice(6)) as AiStreamEvent;
+        onEvent(event);
+        if (event.type === "done" || event.type === "error") {
+          finished = true;
+        }
+      }
+    }
+  }
+  if (!finished) throw new Error("stream-interrupted");
+}

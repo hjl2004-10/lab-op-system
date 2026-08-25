@@ -1,11 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  Bot,
   CheckCircle2,
   Database,
   Download,
   FileJson,
   GraduationCap,
+  Loader2,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -42,6 +44,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -50,6 +53,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { Person, Class, Role } from "@/types";
+import { api, readAiStream } from "@/lib/api";
 
 interface NewAccount {
   username: string;
@@ -178,6 +182,64 @@ export default function SystemPage({
   const [importing, setImporting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  // AI 设置 state
+  const [aiDraft, setAiDraft] = useState({ enabled: false, model: "" });
+  const [aiAvailable, setAiAvailable] = useState(true);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    api
+      .getAiSettings()
+      .then((settings) => {
+        setAiDraft({ enabled: settings.enabled, model: settings.model });
+        setAiAvailable(settings.available);
+      })
+      .catch(() => setAiTestResult("AI 设置加载失败"));
+  }, [isAdmin]);
+
+  const handleSaveAiSettings = async () => {
+    setAiSaving(true);
+    setAiTestResult(null);
+    try {
+      await api.saveAiSettings(aiDraft);
+      setResult({ type: "success", message: aiDraft.enabled ? "AI 功能已开启" : "AI 功能已关闭" });
+    } catch (error) {
+      setResult({
+        type: "error",
+        message: error instanceof Error ? error.message : "保存失败",
+      });
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleTestAi = async () => {
+    setAiTesting(true);
+    setAiTestResult(null);
+    let conversationId: string | null = null;
+    try {
+      const conversation = await api.createAiConversation("连接测试");
+      conversationId = conversation.id;
+      const { assistantMessageId } = await api.sendAiChat(conversationId, "你好，请回复「连接正常」四个字");
+      let reply = "";
+      let outcome: string | null = null;
+      await readAiStream(assistantMessageId, 0, (event) => {
+        if (event.type === "delta" && event.text) reply += event.text;
+        if (event.type === "error") outcome = event.message ?? "AI 回复出错";
+      });
+      setAiTestResult(outcome ? `测试失败：${outcome}` : `测试成功，AI 回复：${reply.slice(0, 50)}`);
+    } catch (error) {
+      setAiTestResult(`测试失败：${error instanceof Error ? error.message : "连接异常"}`);
+    } finally {
+      setAiTesting(false);
+      if (conversationId) {
+        api.deleteAiConversation(conversationId).catch(() => undefined);
+      }
+    }
+  };
 
   const activePeople = people.filter((person) => person.status !== "archived");
   const archivedPeople = people.filter((person) => person.status === "archived");
@@ -297,16 +359,21 @@ export default function SystemPage({
       )}
 
       <Tabs defaultValue="accounts" className="space-y-4">
-        <TabsList className="grid h-10 w-full max-w-lg grid-cols-3 rounded-lg bg-slate-950/5 dark:bg-slate-100/10">
-          <TabsTrigger value="accounts" className="rounded-md">
+        <TabsList className="flex h-10 w-full max-w-2xl gap-1 rounded-lg bg-slate-950/5 dark:bg-slate-100/10">
+          <TabsTrigger value="accounts" className="flex-1 rounded-md">
             <Users className="size-4" />账户管理
           </TabsTrigger>
-          <TabsTrigger value="classes" className="rounded-md">
+          <TabsTrigger value="classes" className="flex-1 rounded-md">
             <School className="size-4" />班级管理
           </TabsTrigger>
           {isAdmin && (
-            <TabsTrigger value="data" className="rounded-md">
+            <TabsTrigger value="data" className="flex-1 rounded-md">
               <Database className="size-4" />数据管理
+            </TabsTrigger>
+          )}
+          {isAdmin && (
+            <TabsTrigger value="ai" className="flex-1 rounded-md">
+              <Bot className="size-4" />AI 设置
             </TabsTrigger>
           )}
         </TabsList>
@@ -563,6 +630,89 @@ export default function SystemPage({
               </div>
               <Button variant="destructive" onClick={() => setResetOpen(true)}>
                 <RotateCcw className="size-4" />重置全部数据
+              </Button>
+            </div>
+          </section>
+        </TabsContent>
+        )}
+
+        {isAdmin && (
+        <TabsContent value="ai" className="mt-0 space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="flex items-center gap-2 text-sm font-semibold">
+                  <Bot className="size-4 text-sky-500" />
+                  AI 助手
+                </h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  通过服务器上的 Claude Code CLI 提供对话、快速建任务与花名册批量建号
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="ai-enabled"
+                  checked={aiDraft.enabled}
+                  onCheckedChange={(checked) =>
+                    setAiDraft((previous) => ({ ...previous, enabled: checked }))
+                  }
+                  aria-label="开启 AI 功能"
+                />
+                <Label htmlFor="ai-enabled" className="text-xs text-slate-500">
+                  {aiDraft.enabled ? "已开启" : "已关闭"}
+                </Label>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-1.5">
+              <Label htmlFor="ai-model" className="text-xs text-slate-500">
+                模型（可选，留空用 Claude Code 默认模型）
+              </Label>
+              <Input
+                id="ai-model"
+                value={aiDraft.model}
+                onChange={(event) =>
+                  setAiDraft((previous) => ({ ...previous, model: event.target.value }))
+                }
+                placeholder="例如 claude-sonnet-4-5"
+                className="max-w-xs"
+                disabled={!aiAvailable}
+              />
+            </div>
+
+            <div
+              className={
+                "mt-4 rounded-md border px-3 py-2 text-xs " +
+                (aiAvailable
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
+                  : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300")
+              }
+            >
+              {aiAvailable
+                ? "已在服务器检测到 claude 命令，可以开启使用。"
+                : "服务器未检测到 claude 命令：请安装 Claude Code CLI 并完成登录后重启服务。"}
+            </div>
+
+            {aiTestResult && (
+              <p className="mt-3 break-all rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                {aiTestResult}
+              </p>
+            )}
+
+            <div className="mt-4 flex gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+              <Button size="sm" onClick={handleSaveAiSettings} disabled={aiSaving || !aiAvailable}>
+                {aiSaving ? <Loader2 className="size-4 animate-spin" /> : null}
+                保存设置
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTestAi}
+                disabled={aiTesting || !aiAvailable || !aiDraft.enabled}
+                title={aiDraft.enabled ? undefined : "请先开启并保存 AI 功能"}
+              >
+                {aiTesting ? <Loader2 className="size-4 animate-spin" /> : null}
+                测试连接
               </Button>
             </div>
           </section>

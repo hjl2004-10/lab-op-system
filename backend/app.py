@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import io
 import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
+import time
+import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
 import bcrypt
+import openpyxl
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from urllib.parse import quote
@@ -30,6 +36,13 @@ SESSION_COOKIE = "yang11_session"
 SESSION_DAYS = 7
 PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,128}$")
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
+
+# ---- AI（Claude Code CLI）----
+AI_SESSIONS_DIR = DATA_DIR / "ai-sessions"
+CLAUDE_CLI = shutil.which("claude")
+AI_TURN_TIMEOUT = int(os.getenv("GANTT_AI_TIMEOUT", "180"))
+AI_MAX_CONCURRENT = int(os.getenv("GANTT_AI_CONCURRENCY", "4"))
+AI_MAX_MESSAGE_CHARS = 16000
 
 
 def now_iso() -> str:
@@ -79,6 +92,7 @@ def database() -> Iterator[sqlite3.Connection]:
 def initialize_database() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    AI_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     with database() as db:
         db.executescript(
             """
@@ -117,6 +131,30 @@ def initialize_database() -> None:
                 uploader TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS ai_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER NOT NULL DEFAULT 0,
+                model TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ai_conversations (
+                id TEXT PRIMARY KEY,
+                person_id TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '新对话',
+                claude_session_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ai_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('pending', 'done', 'error')),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation
+                ON ai_messages(conversation_id, id);
             """
         )
         columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
@@ -831,6 +869,497 @@ def download_attachment(
             "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
         },
     )
+
+
+# ===================== AI 助手（服务器 Claude Code CLI） =====================
+
+def read_ai_settings() -> dict[str, Any]:
+    with database() as db:
+        row = db.execute("SELECT enabled, model FROM ai_settings WHERE id = 1").fetchone()
+    return {
+        "enabled": bool(row["enabled"]) if row else False,
+        "model": row["model"] if row else "",
+    }
+
+
+class AiTurn:
+    """一轮 AI 回复：后台任务执行 claude CLI，事件带自增 seq 写入缓冲，支持断线重连重放。"""
+
+    def __init__(
+        self,
+        message_id: int,
+        conversation_id: str,
+        person_id: str,
+        prompt: str,
+        model: str,
+        resume_session: str | None,
+    ) -> None:
+        self.message_id = message_id
+        self.conversation_id = conversation_id
+        self.person_id = person_id
+        self.prompt = prompt
+        self.model = model
+        self.resume_session = resume_session
+        self.events: list[dict[str, Any]] = []
+        self.seq = 0
+        self.finished = False
+        self.wakeups: list[asyncio.Event] = []
+        self.created = time.monotonic()
+
+    def emit(self, event_type: str, **fields: Any) -> None:
+        self.seq += 1
+        event = {"seq": self.seq, "type": event_type, **fields}
+        self.events.append(event)
+        if event_type in ("done", "error"):
+            self.finished = True
+        for wakeup in self.wakeups:
+            wakeup.set()
+
+
+ai_active_turns: dict[int, AiTurn] = {}
+ai_busy_conversations: set[str] = set()
+
+
+def prune_finished_turns() -> None:
+    for message_id in [
+        mid
+        for mid, turn in ai_active_turns.items()
+        if turn.finished and time.monotonic() - turn.created > 600
+    ]:
+        ai_active_turns.pop(message_id, None)
+
+
+async def run_claude_process(
+    workdir: Path,
+    prompt: str,
+    model: str,
+    resume_session: str | None,
+    on_delta: Any = None,
+) -> tuple[str, str | None, str | None]:
+    """执行一次 claude -p，返回 (完整回复文本, claude session id, 错误信息)。"""
+    command = [CLAUDE_CLI, "-p", "--output-format", "stream-json", "--verbose", "--allowedTools", ""]
+    if model:
+        command += ["--model", model]
+    if resume_session:
+        command += ["--resume", resume_session]
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=workdir,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert process.stdin and process.stdout and process.stderr
+
+    async def drain_stderr() -> None:
+        while await process.stderr.readline():
+            pass
+
+    stderr_task = asyncio.create_task(drain_stderr())
+    try:
+        process.stdin.write(prompt.encode("utf-8"))
+        await process.stdin.drain()
+        process.stdin.close()
+
+        streamed: list[str] = []
+        session_id: str | None = None
+        result_text: str | None = None
+        while True:
+            line = await asyncio.wait_for(process.stdout.readline(), timeout=AI_TURN_TIMEOUT)
+            if not line:
+                break
+            text_line = line.decode("utf-8", errors="replace").strip()
+            if not text_line:
+                continue
+            try:
+                event = json.loads(text_line)
+            except json.JSONDecodeError:
+                continue
+            event_type = event.get("type")
+            if event_type == "system" and event.get("subtype") == "init":
+                session_id = event.get("session_id") or session_id
+            elif event_type == "assistant":
+                for block in event.get("message", {}).get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        chunk = block.get("text", "")
+                        if chunk:
+                            streamed.append(chunk)
+                            if on_delta:
+                                on_delta(chunk)
+            elif event_type == "result":
+                session_id = event.get("session_id") or session_id
+                result_text = event.get("result")
+        await process.wait()
+        full_text = result_text if result_text is not None else "".join(streamed)
+        if process.returncode != 0 and not full_text:
+            return ("", session_id, f"AI 进程退出（code {process.returncode}），请稍后重试")
+        # result 与已流出的增量可能重复/不一致：以 result 为准补齐未发出的尾巴
+        if on_delta and full_text:
+            emitted = "".join(streamed)
+            if full_text.startswith(emitted) and len(full_text) > len(emitted):
+                on_delta(full_text[len(emitted):])
+        return (full_text, session_id, None)
+    except asyncio.TimeoutError:
+        process.kill()
+        return ("", None, "AI 响应超时，请稍后重试")
+    except OSError as error:
+        process.kill()
+        return ("", None, f"AI 进程启动失败：{error}")
+    finally:
+        stderr_task.cancel()
+
+
+def build_fallback_prompt(conversation_id: str, prompt: str) -> str:
+    """resume 失效时，把最近历史拼进 prompt 重发，保证对话连续性优雅退化。"""
+    with database() as db:
+        rows = db.execute(
+            "SELECT role, content FROM ai_messages WHERE conversation_id = ? AND state = 'done' "
+            "ORDER BY id DESC LIMIT 10",
+            (conversation_id,),
+        ).fetchall()
+    history = "\n".join(
+        f"{'用户' if row['role'] == 'user' else '助手'}：{row['content']}" for row in reversed(rows)
+    )
+    return (
+        "（此前会话已过期，以下是最近的对话记录，请在此基础上继续）\n"
+        f"{history}\n\n用户最新消息：{prompt}"
+    )
+
+
+async def execute_ai_turn(turn: AiTurn) -> None:
+    workdir = AI_SESSIONS_DIR / turn.conversation_id
+    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        text, session_id, error = await run_claude_process(
+            workdir, turn.prompt, turn.model, turn.resume_session,
+            on_delta=lambda chunk: turn.emit("delta", text=chunk),
+        )
+        if error and not text and turn.resume_session:
+            # resume 的 session 已失效（被清理/换端），降级为新会话带历史重发
+            text, session_id, error = await run_claude_process(
+                workdir, build_fallback_prompt(turn.conversation_id, turn.prompt), turn.model, None,
+                on_delta=lambda chunk: turn.emit("delta", text=chunk),
+            )
+        if error and not text:
+            with database() as db:
+                db.execute(
+                    "UPDATE ai_messages SET state = 'error' WHERE id = ?", (turn.message_id,)
+                )
+                db.execute(
+                    "UPDATE ai_conversations SET updated_at = ? WHERE id = ?",
+                    (now_iso(), turn.conversation_id),
+                )
+            turn.emit("error", message=error)
+            return
+        with database() as db:
+            db.execute(
+                "UPDATE ai_messages SET content = ?, state = 'done' WHERE id = ?",
+                (text, turn.message_id),
+            )
+            db.execute(
+                "UPDATE ai_conversations SET claude_session_id = ?, updated_at = ? WHERE id = ?",
+                (session_id or turn.resume_session, now_iso(), turn.conversation_id),
+            )
+        turn.emit("done")
+    except Exception as error:  # noqa: BLE001 — 后台任务兜底，任何异常都要反馈给前端
+        with database() as db:
+            db.execute(
+                "UPDATE ai_messages SET state = 'error' WHERE id = ?", (turn.message_id,)
+            )
+        turn.emit("error", message=f"AI 内部错误：{error}")
+    finally:
+        ai_busy_conversations.discard(turn.conversation_id)
+
+
+class AiSettingsRequest(BaseModel):
+    enabled: bool
+    model: str = Field(default="", max_length=64)
+
+
+class AiConversationCreateRequest(BaseModel):
+    title: str = Field(default="", max_length=60)
+
+
+class AiChatRequest(BaseModel):
+    conversation_id: str = Field(min_length=8, max_length=64)
+    content: str = Field(min_length=1, max_length=AI_MAX_MESSAGE_CHARS)
+
+
+def get_owned_conversation(conversation_id: str, person_id: str) -> sqlite3.Row:
+    with database() as db:
+        row = db.execute(
+            "SELECT * FROM ai_conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+    if not row or row["person_id"] != person_id:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return row
+
+
+@app.get("/api/ai/status")
+def ai_status(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    settings = read_ai_settings()
+    return {"available": CLAUDE_CLI is not None, "enabled": settings["enabled"]}
+
+
+@app.get("/api/ai/settings")
+def get_ai_settings(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可配置 AI")
+    settings = read_ai_settings()
+    return {**settings, "available": CLAUDE_CLI is not None}
+
+
+@app.put("/api/ai/settings")
+def put_ai_settings(
+    payload: AiSettingsRequest, user: dict[str, Any] = Depends(current_user)
+) -> dict[str, Any]:
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可配置 AI")
+    with database() as db:
+        db.execute(
+            "INSERT INTO ai_settings (id, enabled, model, updated_at) VALUES (1, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled, "
+            "model = excluded.model, updated_at = excluded.updated_at",
+            (1 if payload.enabled else 0, payload.model.strip(), now_iso()),
+        )
+    return {"ok": True}
+
+
+@app.get("/api/ai/conversations")
+def list_ai_conversations(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    with database() as db:
+        rows = db.execute(
+            "SELECT id, title, updated_at FROM ai_conversations WHERE person_id = ? "
+            "ORDER BY updated_at DESC LIMIT 50",
+            (user["personId"],),
+        ).fetchall()
+    return {
+        "conversations": [
+            {"id": row["id"], "title": row["title"], "updatedAt": row["updated_at"]}
+            for row in rows
+        ]
+    }
+
+
+@app.post("/api/ai/conversations", status_code=status.HTTP_201_CREATED)
+def create_ai_conversation(
+    payload: AiConversationCreateRequest, user: dict[str, Any] = Depends(current_user)
+) -> dict[str, Any]:
+    conversation_id = uuid.uuid4().hex
+    title = payload.title.strip() or "新对话"
+    with database() as db:
+        db.execute(
+            "INSERT INTO ai_conversations (id, person_id, title, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (conversation_id, user["personId"], title, now_iso(), now_iso()),
+        )
+    return {"id": conversation_id, "title": title}
+
+
+@app.delete("/api/ai/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ai_conversation(
+    conversation_id: str, user: dict[str, Any] = Depends(current_user)
+) -> Response:
+    get_owned_conversation(conversation_id, user["personId"])
+    if conversation_id in ai_busy_conversations:
+        raise HTTPException(status_code=409, detail="AI 正在回复，请等待结束后再删除")
+    with database() as db:
+        db.execute("DELETE FROM ai_messages WHERE conversation_id = ?", (conversation_id,))
+        db.execute("DELETE FROM ai_conversations WHERE id = ?", (conversation_id,))
+    shutil.rmtree(AI_SESSIONS_DIR / conversation_id, ignore_errors=True)
+    return Response(status_code=204)
+
+
+@app.get("/api/ai/conversations/{conversation_id}/messages")
+def list_ai_messages(
+    conversation_id: str, user: dict[str, Any] = Depends(current_user)
+) -> dict[str, Any]:
+    get_owned_conversation(conversation_id, user["personId"])
+    with database() as db:
+        rows = db.execute(
+            "SELECT id, role, content, state, created_at FROM ai_messages "
+            "WHERE conversation_id = ? ORDER BY id ASC LIMIT 500",
+            (conversation_id,),
+        ).fetchall()
+    return {
+        "messages": [
+            {
+                "id": row["id"],
+                "role": row["role"],
+                "content": row["content"],
+                "state": row["state"],
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.post("/api/ai/chat", status_code=status.HTTP_202_ACCEPTED)
+async def send_ai_chat(
+    payload: AiChatRequest, user: dict[str, Any] = Depends(current_user)
+) -> dict[str, Any]:
+    if not CLAUDE_CLI:
+        raise HTTPException(status_code=400, detail="服务器未安装 Claude Code CLI")
+    settings = read_ai_settings()
+    if not settings["enabled"]:
+        raise HTTPException(status_code=400, detail="AI 功能未开启，请联系管理员")
+    conversation = get_owned_conversation(payload.conversation_id, user["personId"])
+    content = payload.content.strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="消息内容不能为空")
+
+    prune_finished_turns()
+    if payload.conversation_id in ai_busy_conversations:
+        raise HTTPException(status_code=409, detail="AI 正在回复上一条消息，请稍候")
+    active_count = sum(1 for turn in ai_active_turns.values() if not turn.finished)
+    if active_count >= AI_MAX_CONCURRENT:
+        raise HTTPException(status_code=503, detail="AI 并发已满，请稍后再试")
+
+    title = content[:18].replace("\n", " ")
+    with database() as db:
+        db.execute(
+            "INSERT INTO ai_messages (conversation_id, role, content, state, created_at) "
+            "VALUES (?, 'user', ?, 'done', ?)",
+            (payload.conversation_id, content, now_iso()),
+        )
+        if not conversation["title"] or conversation["title"] == "新对话":
+            db.execute(
+                "UPDATE ai_conversations SET title = ? WHERE id = ?",
+                (title, payload.conversation_id),
+            )
+        cursor = db.execute(
+            "INSERT INTO ai_messages (conversation_id, role, content, state, created_at) "
+            "VALUES (?, 'assistant', '', 'pending', ?)",
+            (payload.conversation_id, now_iso()),
+        )
+        assistant_message_id = int(cursor.lastrowid or 0)
+
+    turn = AiTurn(
+        message_id=assistant_message_id,
+        conversation_id=payload.conversation_id,
+        person_id=user["personId"],
+        prompt=content,
+        model=settings["model"],
+        resume_session=conversation["claude_session_id"],
+    )
+    ai_active_turns[assistant_message_id] = turn
+    ai_busy_conversations.add(payload.conversation_id)
+    asyncio.create_task(execute_ai_turn(turn))
+    return {"assistantMessageId": assistant_message_id}
+
+
+@app.get("/api/ai/stream/{message_id}")
+async def stream_ai_reply(
+    message_id: int, from_seq: int = 0, user: dict[str, Any] = Depends(current_user)
+) -> StreamingResponse:
+    turn = ai_active_turns.get(message_id)
+    if turn is None:
+        # 进程重启等原因导致任务不在内存：从数据库回放终态
+        with database() as db:
+            row = db.execute(
+                """
+                SELECT m.role, m.content, m.state, c.person_id
+                FROM ai_messages m JOIN ai_conversations c ON c.id = m.conversation_id
+                WHERE m.id = ?
+                """,
+                (message_id,),
+            ).fetchone()
+        if not row or row["person_id"] != user["personId"]:
+            raise HTTPException(status_code=404, detail="消息不存在")
+        if row["state"] == "done" and row["content"]:
+            events = [
+                {"seq": 1, "type": "delta", "text": row["content"]},
+                {"seq": 2, "type": "done"},
+            ]
+        else:
+            with database() as db:
+                db.execute("UPDATE ai_messages SET state = 'error' WHERE id = ?", (message_id,))
+            events = [{"seq": 1, "type": "error", "message": "回复已中断，请重新发送"}]
+
+        async def replay() -> Any:
+            for event in events:
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        return _sse_response(replay())
+
+    if turn.person_id != user["personId"]:
+        raise HTTPException(status_code=404, detail="消息不存在")
+
+    async def event_stream() -> Any:
+        last = from_seq
+        wakeup = asyncio.Event()
+        while True:
+            while last < turn.seq:
+                last += 1
+                event = turn.events[last - 1]
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event["type"] in ("done", "error"):
+                    return
+            if turn.finished:
+                return
+            wakeup.clear()
+            turn.wakeups.append(wakeup)
+            try:
+                if last < turn.seq:  # 注册唤醒后再查一次，避免竞态漏事件
+                    continue
+                await asyncio.wait_for(wakeup.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"  # SSE 心跳，防止代理断开空闲连接
+            finally:
+                if wakeup in turn.wakeups:
+                    turn.wakeups.remove(wakeup)
+
+    return _sse_response(event_stream())
+
+
+def _sse_response(generator: Any) -> StreamingResponse:
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+AI_TEXT_SUFFIXES = {".txt", ".csv", ".md", ".json", ".log"}
+AI_FILE_MAX_BYTES = 2 * 1024 * 1024
+
+
+@app.post("/api/ai/file-text")
+async def ai_file_text(
+    file: UploadFile = File(...), user: dict[str, Any] = Depends(current_user)
+) -> dict[str, Any]:
+    data = await file.read()
+    if len(data) > AI_FILE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="文件不能超过 2MB")
+    name = file.filename or "未命名文件"
+    suffix = Path(name).suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        try:
+            workbook = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        except Exception as error:
+            raise HTTPException(status_code=400, detail="Excel 文件解析失败") from error
+        lines: list[str] = []
+        for sheet in workbook.worksheets:
+            lines.append(f"## 工作表：{sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                cells = ["" if cell is None else str(cell).strip() for cell in row]
+                if any(cells):
+                    lines.append("\t".join(cells))
+        text = "\n".join(lines)
+    elif suffix in AI_TEXT_SUFFIXES or suffix == "":
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = data.decode("gbk")
+            except UnicodeDecodeError as error:
+                raise HTTPException(
+                    status_code=400, detail="仅支持文本文件（txt/csv/md/json）与 xlsx"
+                ) from error
+    else:
+        raise HTTPException(status_code=400, detail="仅支持文本文件（txt/csv/md/json）与 xlsx")
+    return {"name": name, "text": text}
 
 
 @app.get("/api/state")
