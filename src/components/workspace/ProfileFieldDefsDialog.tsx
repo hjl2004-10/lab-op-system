@@ -81,7 +81,7 @@ export default function ProfileFieldDefsDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Settings2 className="size-5 text-blue-700 dark:text-blue-300" />
+            <Settings2 className="size-5 text-slate-600 dark:text-slate-300" />
             预设档案字段
           </DialogTitle>
           <p className="text-xs text-slate-500 dark:text-slate-400">

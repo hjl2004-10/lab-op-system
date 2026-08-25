@@ -280,7 +280,7 @@ export default function AddTaskSheet({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="add-task-progress">进度</Label>
-                <span className="text-sm font-medium text-[#2f6db3] dark:text-blue-400">
+                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
                   {form.progress}%
                 </span>
               </div>
@@ -297,7 +297,7 @@ export default function AddTaskSheet({
                 max={100}
                 step={1}
                 aria-label="任务进度"
-                className="[&_[data-slot=slider-range]]:bg-[#2f6db3] [&_[data-slot=slider-thumb]]:border-[#2f6db3]"
+                className="[&_[data-slot=slider-range]]:bg-slate-700 [&_[data-slot=slider-thumb]]:border-slate-700"
               />
             </div>
 
@@ -350,7 +350,7 @@ export default function AddTaskSheet({
             </Button>
             <Button
               type="submit"
-              className="bg-[#2f6db3] text-white hover:bg-[#1e4a75]"
+              className="bg-sky-500 text-white shadow-xs hover:bg-sky-600"
             >
               <Plus className="size-4" />
               创建任务

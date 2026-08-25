@@ -18,7 +18,7 @@ export default function AttachmentList({ attachments }: AttachmentListProps) {
           <a
             href={attachmentUrl(attachment.id)}
             title={attachment.name}
-            className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 transition-colors hover:border-[#2f6db3] hover:text-[#2f6db3] dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-400"
+            className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 transition-colors hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-sky-400 dark:hover:text-sky-400"
           >
             <Paperclip className="size-3 shrink-0" />
             <span className="truncate">{attachment.name}</span>

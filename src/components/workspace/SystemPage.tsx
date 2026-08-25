@@ -264,11 +264,11 @@ export default function SystemPage({
 
   return (
     <main className="min-w-0 space-y-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:p-6">
-      <header className="border-b border-blue-900/15 pb-4 dark:border-blue-300/15">
-        <div className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
+      <header className="border-b border-slate-200 pb-4 dark:border-slate-700">
+        <div className="flex items-center gap-2 text-slate-900 dark:text-slate-100">
           <Settings2 className="size-5" />
           <h1 className="text-lg font-semibold">系统管理</h1>
-          <Badge className="rounded-md bg-blue-100 text-blue-900 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-200">
+          <Badge className="rounded-md bg-slate-100 text-slate-700 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200">
             {isAdmin ? "管理员" : "老师"}
           </Badge>
         </div>
@@ -282,7 +282,7 @@ export default function SystemPage({
           variant={result.type === "error" ? "destructive" : "default"}
           className={
             result.type === "success"
-              ? "rounded-lg border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100"
+              ? "rounded-lg border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-100"
               : "rounded-lg"
           }
         >
@@ -297,7 +297,7 @@ export default function SystemPage({
       )}
 
       <Tabs defaultValue="accounts" className="space-y-4">
-        <TabsList className="grid h-10 w-full max-w-lg grid-cols-3 rounded-lg bg-blue-950/5 dark:bg-blue-100/10">
+        <TabsList className="grid h-10 w-full max-w-lg grid-cols-3 rounded-lg bg-slate-950/5 dark:bg-slate-100/10">
           <TabsTrigger value="accounts" className="rounded-md">
             <Users className="size-4" />账户管理
           </TabsTrigger>
@@ -323,7 +323,7 @@ export default function SystemPage({
                 key={label}
                 className="flex min-h-20 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900"
               >
-                <span className="flex size-8 items-center justify-center rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                <span className="flex size-8 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   <Icon className="size-4" />
                 </span>
                 <div>
@@ -343,7 +343,7 @@ export default function SystemPage({
                 </p>
               </div>
               <Button
-                className="bg-blue-800 hover:bg-blue-700"
+                className="bg-sky-500 hover:bg-sky-600"
                 onClick={() => setPeopleManagerOpen(true)}
               >
                 <Users className="size-4" />打开账户管理
@@ -438,7 +438,7 @@ export default function SystemPage({
                         {memberList.map((m) => (
                           <span
                             key={m.id}
-                            className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-800 dark:bg-blue-950 dark:text-blue-200"
+                            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                           >
                             <span className="size-2 rounded-full" style={{ backgroundColor: m.color }} />
                             {m.name}
@@ -485,7 +485,7 @@ export default function SystemPage({
                 <Switch
                   checked={autoSave}
                   onCheckedChange={() => onToggleAutoSave()}
-                  className="data-[state=checked]:bg-blue-700"
+                  className="data-[state=checked]:bg-slate-700"
                 />
                 {autoSave ? "已开启" : "已关闭"}
               </label>
@@ -495,7 +495,7 @@ export default function SystemPage({
           <section className="grid gap-4 lg:grid-cols-2">
             <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-start gap-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   <Download className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -512,7 +512,7 @@ export default function SystemPage({
 
             <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-start gap-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   <Upload className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -671,7 +671,7 @@ export default function SystemPage({
             <AlertDialogCancel disabled={importing}>取消</AlertDialogCancel>
             <AlertDialogAction
               disabled={importing}
-              className="bg-blue-800 hover:bg-blue-700"
+              className="bg-sky-500 hover:bg-sky-600"
               onClick={(event) => {
                 event.preventDefault();
                 void confirmImport();

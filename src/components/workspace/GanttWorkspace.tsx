@@ -1,12 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  List,
-  PanelRight,
-  RotateCcw,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, List, PanelRight, RotateCcw } from "lucide-react";
 import GanttBoard, { type GanttBoardHandle } from "@/components/workspace/GanttBoard";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,10 +11,8 @@ interface GanttWorkspaceProps {
   people: Person[];
   viewMode: "day" | "week" | "month";
   holidays: Record<string, string>;
-  onViewModeChange: (mode: "day" | "week" | "month") => void;
   onTaskClick: (task: Task) => void;
   onReorder: (taskIds: string[]) => void;
-  onExportImage: () => void;
 }
 
 export default function GanttWorkspace({
@@ -29,10 +20,8 @@ export default function GanttWorkspace({
   people,
   viewMode,
   holidays,
-  onViewModeChange,
   onTaskClick,
   onReorder,
-  onExportImage,
 }: GanttWorkspaceProps) {
   const isMobile = useIsMobile();
   const [mobileView, setMobileView] = useState<"tasks" | "timeline">("tasks");
@@ -112,17 +101,6 @@ export default function GanttWorkspace({
               </button>
             </div>
           )}
-          <div className="gantt-zoom" aria-label="时间粒度">
-            {(["day", "week", "month"] as const).map((mode) => (
-              <button
-                key={mode}
-                className={cn(viewMode === mode && "active")}
-                onClick={() => onViewModeChange(mode)}
-              >
-                {{ day: "日", week: "周", month: "月" }[mode]}
-              </button>
-            ))}
-          </div>
           {!isMobile && (
             <Button
               variant="ghost"
@@ -134,15 +112,6 @@ export default function GanttWorkspace({
               <RotateCcw />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onExportImage}
-            title="导出甘特图图片"
-            aria-label="导出甘特图图片"
-          >
-            <Download />
-          </Button>
         </div>
       </div>
 

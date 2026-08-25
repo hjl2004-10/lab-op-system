@@ -325,9 +325,9 @@ export default function ProfilesPage(props: ProfilesPageProps) {
 
   return (
     <main className="min-w-0 space-y-4 bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:p-6">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-blue-900/15 pb-4 dark:border-blue-300/15">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-700">
         <div>
-          <div className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
+          <div className="flex items-center gap-2 text-slate-900 dark:text-slate-100">
             <GraduationCap className="size-5" />
             <h1 className="text-lg font-semibold">学生档案</h1>
           </div>
@@ -397,8 +397,8 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                     className={cn(
                       "flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                       effectiveSelectedPersonId === person.id
-                        ? "bg-blue-800 font-medium text-white"
-                        : "text-slate-700 hover:bg-blue-50 dark:text-slate-200 dark:hover:bg-blue-950"
+                        ? "bg-slate-800 font-medium text-white"
+                        : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
                     )}
                   >
                     <span
@@ -422,7 +422,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex min-w-0 items-center gap-3">
                   <span
-                    className="flex size-10 shrink-0 items-center justify-center rounded-md bg-blue-50 dark:bg-blue-950"
+                    className="flex size-10 shrink-0 items-center justify-center rounded-md bg-slate-100 dark:bg-slate-800"
                     style={{ color: selectedPerson.color }}
                   >
                     <UserRound className="size-5" />
@@ -449,7 +449,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                     </Button>
                     <Button
                       size="sm"
-                      className="bg-blue-800 hover:bg-blue-700"
+                      className="bg-sky-500 hover:bg-sky-600"
                       onClick={savePublicProfile}
                     >
                       <Save className="size-4" />保存
@@ -562,7 +562,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
               )}
 
               {isManager && editingPublic && (
-                <div className="mt-4 rounded-lg border border-dashed border-blue-300 p-3 dark:border-blue-800">
+                <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-3 dark:border-slate-700">
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Input
                       value={newFieldName}
@@ -612,7 +612,7 @@ export default function ProfilesPage(props: ProfilesPageProps) {
                       </Button>
                       <Button
                         size="sm"
-                        className="bg-blue-800 hover:bg-blue-700"
+                        className="bg-sky-500 hover:bg-sky-600"
                         onClick={saveAdminData}
                       >
                         <Save className="size-4" />保存

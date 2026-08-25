@@ -178,7 +178,7 @@ function generateColumns(
 }
 
 function progressColor(progress: number): string {
-  if (progress >= 100) return "text-blue-500";
+  if (progress >= 100) return "text-emerald-500";
   if (progress > 0) return "text-amber-500";
   return "text-slate-400";
 }
