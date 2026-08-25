@@ -18,7 +18,7 @@ from typing import Any, Iterator
 
 import bcrypt
 import openpyxl
-from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
+from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -192,6 +192,10 @@ def initialize_database() -> None:
             db.execute("ALTER TABLE sessions ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''")
             # 存量会话的 last_seen 以创建时间兜底（旧会话很快自然过期）
             db.execute("UPDATE sessions SET last_seen = created_at WHERE last_seen = ''")
+        if "ip" not in session_columns:
+            db.execute("ALTER TABLE sessions ADD COLUMN ip TEXT NOT NULL DEFAULT ''")
+        if "user_agent" not in session_columns:
+            db.execute("ALTER TABLE sessions ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''")
         db.execute("UPDATE users SET username = person_id WHERE username IS NULL OR username = ''")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE NOCASE)")
 
@@ -761,10 +765,18 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def client_ip(request: Request) -> str:
+    """客户端 IP：反向代理场景优先取 X-Forwarded-For 首段"""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    first = forwarded.split(",")[0].strip()
+    return first or (request.client.host if request.client else "")
+
+
 @app.post("/api/auth/login")
 def login(
     payload: LoginRequest,
     response: Response,
+    request: Request,
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> dict[str, Any]:
     with database() as db:
@@ -795,8 +807,17 @@ def login(
         token = secrets.token_urlsafe(32)
         expires_at = (datetime.now(UTC) + timedelta(days=SESSION_DAYS)).isoformat()
         db.execute(
-            "INSERT INTO sessions (token_hash, person_id, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (hash_token(token), row["person_id"], expires_at, now, now),
+            "INSERT INTO sessions (token_hash, person_id, expires_at, created_at, last_seen, ip, user_agent) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                hash_token(token),
+                row["person_id"],
+                expires_at,
+                now,
+                now,
+                client_ip(request)[:64],
+                (request.headers.get("user-agent") or "")[:256],
+            ),
         )
     response.set_cookie(
         SESSION_COOKIE,
@@ -872,6 +893,56 @@ def change_own_password(
                 "DELETE FROM sessions WHERE person_id = ? AND token_hash != ?",
                 (user["personId"], hash_token(session_token)),
             )
+    return Response(status_code=204)
+
+
+@app.get("/api/sessions")
+def list_sessions(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    """管理员查看全系统有效会话（登录设备/IP/活跃状态）"""
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可查看在线会话")
+    now = now_iso()
+    online_cutoff = (datetime.now(UTC) - timedelta(minutes=SESSION_ONLINE_MINUTES)).isoformat()
+    with database() as db:
+        rows = db.execute(
+            """
+            SELECT s.token_hash, s.created_at, s.last_seen, s.ip, s.user_agent,
+                   u.username, u.name, u.role
+            FROM sessions s JOIN users u ON u.person_id = s.person_id
+            WHERE s.expires_at > ?
+            ORDER BY s.last_seen DESC
+            """,
+            (now,),
+        ).fetchall()
+    return {
+        "sessions": [
+            {
+                "tokenHash": row["token_hash"],
+                "username": row["username"],
+                "name": row["name"],
+                "role": row["role"],
+                "ip": row["ip"],
+                "userAgent": row["user_agent"],
+                "createdAt": row["created_at"],
+                "lastSeen": row["last_seen"] or row["created_at"],
+                "online": (row["last_seen"] or row["created_at"]) > online_cutoff,
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.delete("/api/sessions/{token_hash}", status_code=status.HTTP_204_NO_CONTENT)
+def kill_session(token_hash: str, user: dict[str, Any] = Depends(current_user)) -> Response:
+    """管理员强制下线某个会话"""
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可管理在线会话")
+    if not re.fullmatch(r"[0-9a-f]{64}", token_hash):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    with database() as db:
+        result = db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="会话不存在或已下线")
     return Response(status_code=204)
 
 

@@ -8,6 +8,8 @@ import {
   FileJson,
   GraduationCap,
   Loader2,
+  LogOut,
+  Monitor,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -53,7 +55,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { Person, Class, Role } from "@/types";
-import { api, readAiStream } from "@/lib/api";
+import { api, readAiStream, type SessionInfo } from "@/lib/api";
 
 interface NewAccount {
   username: string;
@@ -188,6 +190,42 @@ export default function SystemPage({
   const [aiSaving, setAiSaving] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<string | null>(null);
+  // 在线会话 state（仅 admin）
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  const loadSessions = async () => {
+    setSessionsLoading(true);
+    try {
+      const data = await api.listSessions();
+      setSessions(data.sessions);
+    } catch {
+      // 静默失败：面板下次刷新重试
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdmin) {
+      api.listSessions().then((data) => setSessions(data.sessions)).catch(() => undefined);
+    }
+  }, [isAdmin]);
+
+  const handleKillSession = async (session: SessionInfo) => {
+    if (!window.confirm(`确定将「${session.name}」的这个会话强制下线吗？该设备需要重新登录。`)) {
+      return;
+    }
+    try {
+      await api.killSession(session.tokenHash);
+      await loadSessions();
+    } catch (error) {
+      setResult({
+        type: "error",
+        message: error instanceof Error ? error.message : "下线失败",
+      });
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -417,6 +455,77 @@ export default function SystemPage({
               </Button>
             </div>
           </section>
+
+          {isAdmin && (
+            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                    <Monitor className="size-4 text-sky-500" />
+                    在线会话
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    每个账号的登录设备与 IP（显示为北京时间）；可强制下线可疑会话
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={loadSessions} disabled={sessionsLoading}>
+                  {sessionsLoading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  刷新
+                </Button>
+              </div>
+
+              {sessions.length === 0 ? (
+                <p className="mt-3 rounded-md border border-dashed border-slate-300 px-3 py-4 text-center text-xs text-slate-400 dark:border-slate-700">
+                  {sessionsLoading ? "正在加载…" : "当前没有有效会话"}
+                </p>
+              ) : (
+                <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+                  {sessions.map((session) => (
+                    <div
+                      key={session.tokenHash}
+                      className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-xs"
+                    >
+                      <span
+                        className={
+                          session.online
+                            ? "size-2 shrink-0 rounded-full bg-emerald-500"
+                            : "size-2 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600"
+                        }
+                        title={session.online ? "在线（30 分钟内有活动）" : "空闲（超过 30 分钟无活动）"}
+                      />
+                      <span className="min-w-20 font-medium">
+                        {session.name}
+                        <span className="ml-1 font-normal text-slate-400">{session.username}</span>
+                      </span>
+                      <span className="min-w-24 text-slate-500 dark:text-slate-400">
+                        {describeDevice(session.userAgent)}
+                      </span>
+                      <span className="font-mono text-slate-400">{session.ip || "未知 IP"}</span>
+                      <span className="text-slate-400">
+                        最后活动 {formatSessionTime(session.lastSeen)}
+                      </span>
+                      <span className={session.online ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}>
+                        {session.online ? "在线" : "空闲"}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-auto h-7 px-2 text-red-500 hover:text-red-600"
+                        onClick={() => handleKillSession(session)}
+                      >
+                        <LogOut className="size-3" />
+                        强制下线
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
         </TabsContent>
 
         <TabsContent value="classes" className="mt-0 space-y-4">
@@ -858,4 +967,42 @@ export default function SystemPage({
       </AlertDialog>
     </main>
   );
+}
+
+/** User-Agent 解析为人话：浏览器 · 操作系统 */
+function describeDevice(userAgent: string): string {
+  if (!userAgent) return "未知设备";
+  const browser = /Edg\//.test(userAgent)
+    ? "Edge"
+    : /OPR\//.test(userAgent)
+      ? "Opera"
+      : /Firefox\//.test(userAgent)
+        ? "Firefox"
+        : /Chrome\//.test(userAgent)
+          ? "Chrome"
+          : /Safari\//.test(userAgent)
+            ? "Safari"
+            : /curl|python|okhttp|wget/i.test(userAgent)
+              ? "命令行/程序"
+              : "浏览器";
+  const os = /Windows/.test(userAgent)
+    ? "Windows"
+    : /Android/.test(userAgent)
+      ? "Android"
+      : /iPhone|iPad/.test(userAgent)
+        ? "iOS"
+        : /Mac OS X/.test(userAgent)
+          ? "macOS"
+          : /Linux/.test(userAgent)
+            ? "Linux"
+            : "未知系统";
+  return `${browser} · ${os}`;
+}
+
+/** 会话时间显示为北京时间 MM-DD HH:mm */
+function formatSessionTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const text = new Date(date.getTime() + 8 * 3600_000).toISOString();
+  return `${text.slice(5, 10).replace("-", "/")} ${text.slice(11, 16)}`;
 }

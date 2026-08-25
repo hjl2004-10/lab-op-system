@@ -27,6 +27,18 @@ export class ApiError extends Error {
   }
 }
 
+export interface SessionInfo {
+  tokenHash: string;
+  username: string;
+  name: string;
+  role: Role;
+  ip: string;
+  userAgent: string;
+  createdAt: string;
+  lastSeen: string;
+  online: boolean;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     credentials: "include",
@@ -65,6 +77,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ old_password: oldPassword, password }),
     }),
+  listSessions: () => request<{ sessions: SessionInfo[] }>("/api/sessions"),
+  killSession: (tokenHash: string) =>
+    request<void>(`/api/sessions/${tokenHash}`, { method: "DELETE" }),
   getState: () =>
     request<{ state: RemoteState | null; revision: number; updatedAt: string | null }>("/api/state"),
   saveState: (state: RemoteState) =>
