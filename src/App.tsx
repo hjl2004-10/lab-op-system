@@ -288,15 +288,7 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
         onImport={state.importData}
       />
 
-      <AIAssistant
-        people={state.people}
-        currentUserId={currentUserId}
-        currentUserName={currentUserName}
-        currentUserRole={user.role}
-        isManager={isManager}
-        onAddTask={state.addTask}
-        onAddAccount={state.addPerson}
-      />
+      <AIAssistant />
     </WorkspaceShell>
   );
 }

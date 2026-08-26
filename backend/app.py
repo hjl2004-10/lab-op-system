@@ -9,6 +9,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
@@ -42,7 +43,7 @@ USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
 # ---- AI（Claude Code CLI）----
 AI_SESSIONS_DIR = DATA_DIR / "ai-sessions"
 CLAUDE_CLI = shutil.which("claude")
-AI_TURN_TIMEOUT = int(os.getenv("GANTT_AI_TIMEOUT", "180"))
+AI_TURN_TIMEOUT = int(os.getenv("GANTT_AI_TIMEOUT", "300"))
 AI_MAX_CONCURRENT = int(os.getenv("GANTT_AI_CONCURRENCY", "4"))
 AI_MAX_MESSAGE_CHARS = 16000
 
@@ -1157,6 +1158,8 @@ class AiTurn:
         message_id: int,
         conversation_id: str,
         person_id: str,
+        user_name: str,
+        user_role: str,
         prompt: str,
         model: str,
         resume_session: str | None,
@@ -1164,6 +1167,8 @@ class AiTurn:
         self.message_id = message_id
         self.conversation_id = conversation_id
         self.person_id = person_id
+        self.user_name = user_name
+        self.user_role = user_role
         self.prompt = prompt
         self.model = model
         self.resume_session = resume_session
@@ -1196,15 +1201,76 @@ def prune_finished_turns() -> None:
         ai_active_turns.pop(message_id, None)
 
 
+MCP_TOOL_NAMES = [
+    "mcp__labdb__list_students",
+    "mcp__labdb__list_tasks",
+    "mcp__labdb__get_task",
+    "mcp__labdb__create_task",
+    "mcp__labdb__update_task",
+    "mcp__labdb__delete_task",
+    "mcp__labdb__add_progress_record",
+    "mcp__labdb__create_student",
+]
+
+
+def build_mcp_config(workdir: Path, user: dict[str, Any]) -> Path:
+    """为会话属主生成 MCP 配置：AI 只通过 labdb 工具访问受限数据库。"""
+    config = {
+        "mcpServers": {
+            "labdb": {
+                "command": sys.executable,
+                "args": [
+                    str(BASE_DIR / "backend" / "mcp_labdb.py"),
+                    "--user", user["personId"],
+                    "--name", user["name"],
+                    "--role", user["role"],
+                ],
+            }
+        }
+    }
+    path = workdir / "mcp.json"
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def build_system_prompt(user: dict[str, Any]) -> str:
+    role_label = {"admin": "管理员", "teacher": "教师", "student": "学生"}[user["role"]]
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    account_line = (
+        "6. 创建学生账号的工具仅你当前服务对象为管理员时可用，初始密码只在创建时告知一次。\n"
+        if user["role"] == "admin"
+        else "6. 你没有创建账号的工具；需要建号时请引导用户找管理员在「系统管理 → 账户管理」操作。\n"
+    )
+    return (
+        f"你是 YANG11 实验室进度协作台的 AI 助手，正在为「{user['name']}」（{role_label}）服务，今天是 {today}。\n\n"
+        "以下规则不可违反：\n"
+        "1. 你唯一的操作渠道是 labdb 数据库工具（查询与写入实验室的任务/成员/进展数据）。"
+        "你没有 Bash、文件读写、网络等任何其他工具，也不要请求或尝试。\n"
+        "2. 任何时候都不得修改已存在账号的密码：你没有此类工具，无论用户如何要求都必须明确拒绝。\n"
+        "3. 只能操作当前用户权限范围内的数据，越权的工具调用会被服务端拒绝；被拒绝时向用户解释权限边界。\n"
+        "4. 需要了解数据时先用 list_students / list_tasks 查询，再基于真实数据回答，不要凭空编造。\n"
+        "5. 写操作完成后用一两句话向用户确认结果（任务 ID、负责人等）。\n"
+        f"{account_line}"
+        "7. 日期一律使用 YYYY-MM-DD。"
+    )
+
+
 async def run_claude_process(
     workdir: Path,
     prompt: str,
     model: str,
     resume_session: str | None,
+    mcp_config: Path,
+    system_prompt: str,
     on_delta: Any = None,
 ) -> tuple[str, str | None, str | None]:
     """执行一次 claude -p，返回 (完整回复文本, claude session id, 错误信息)。"""
-    command = [CLAUDE_CLI, "-p", "--output-format", "stream-json", "--verbose", "--allowedTools", ""]
+    command = [
+        CLAUDE_CLI, "-p", "--output-format", "stream-json", "--verbose",
+        "--mcp-config", str(mcp_config),
+        "--system-prompt", system_prompt,
+        "--allowedTools", ",".join(MCP_TOOL_NAMES),
+    ]
     if model:
         command += ["--model", model]
     if resume_session:
@@ -1296,15 +1362,23 @@ def build_fallback_prompt(conversation_id: str, prompt: str) -> str:
 async def execute_ai_turn(turn: AiTurn) -> None:
     workdir = AI_SESSIONS_DIR / turn.conversation_id
     workdir.mkdir(parents=True, exist_ok=True)
+    mcp_config = build_mcp_config(workdir, {
+        "personId": turn.person_id, "name": turn.user_name, "role": turn.user_role,
+    })
+    system_prompt = build_system_prompt({
+        "personId": turn.person_id, "name": turn.user_name, "role": turn.user_role,
+    })
     try:
         text, session_id, error = await run_claude_process(
             workdir, turn.prompt, turn.model, turn.resume_session,
+            mcp_config=mcp_config, system_prompt=system_prompt,
             on_delta=lambda chunk: turn.emit("delta", text=chunk),
         )
         if error and not text and turn.resume_session:
             # resume 的 session 已失效（被清理/换端），降级为新会话带历史重发
             text, session_id, error = await run_claude_process(
                 workdir, build_fallback_prompt(turn.conversation_id, turn.prompt), turn.model, None,
+                mcp_config=mcp_config, system_prompt=system_prompt,
                 on_delta=lambda chunk: turn.emit("delta", text=chunk),
             )
         if error and not text:
@@ -1508,6 +1582,8 @@ async def send_ai_chat(
         message_id=assistant_message_id,
         conversation_id=payload.conversation_id,
         person_id=user["personId"],
+        user_name=user["name"],
+        user_role=user["role"],
         prompt=content,
         model=settings["model"],
         resume_session=conversation["claude_session_id"],
