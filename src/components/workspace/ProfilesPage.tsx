@@ -126,6 +126,17 @@ export default function ProfilesPage(props: ProfilesPageProps) {
   // 档案页视图切换 + 预设字段管理弹窗
   const [viewMode, setViewMode] = useState<"card" | "table">("card");
   const [showDefsDialog, setShowDefsDialog] = useState(false);
+  // 表格模式的状态面板：在读（默认）/ 毕业（已停用）/ 全部
+  const [statusView, setStatusView] = useState<"active" | "graduated" | "all">("active");
+  const statusFilteredStudents = useMemo(() => {
+    if (statusView === "active") {
+      return students.filter((person) => person.status !== "archived");
+    }
+    if (statusView === "graduated") {
+      return students.filter((person) => person.status === "archived");
+    }
+    return students;
+  }, [statusView, students]);
 
   const effectiveSelectedPersonId = visibleStudents.some(
     (person) => person.id === selectedPersonId
@@ -363,23 +374,62 @@ export default function ProfilesPage(props: ProfilesPageProps) {
       {visibleStudents.length ? (
         viewMode === "table" && isManager ? (
           <div className="space-y-4">
+            {/* 状态切换面板：在读 / 毕业（已停用）/ 全部 */}
+            <div className="flex items-center gap-3">
+              <div
+                className="flex overflow-hidden rounded-md border border-slate-200 dark:border-slate-700"
+                role="group"
+                aria-label="学生状态筛选"
+              >
+                {([
+                  { value: "active", label: `在读 ${students.filter((p) => p.status !== "archived").length}` },
+                  { value: "graduated", label: `毕业 ${students.filter((p) => p.status === "archived").length}` },
+                  { value: "all", label: `全部 ${students.length}` },
+                ] as const).map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={cn(
+                      "border-r border-slate-200 px-3 py-1.5 text-xs font-medium transition-colors last:border-r-0 dark:border-slate-700",
+                      statusView === item.value
+                        ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
+                        : "bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    )}
+                    aria-pressed={statusView === item.value}
+                    onClick={() => setStatusView(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {statusView === "graduated" && (
+                <p className="text-xs text-slate-400">毕业 = 已停用账号的学生，档案仍保留可查</p>
+              )}
+            </div>
+
             <StudentCards
-              students={students}
+              students={statusFilteredStudents}
               selectedStudentIds={selectedStudentIds}
               onSelectedStudentIdsChange={onSelectedStudentIdsChange}
             />
-            <ProfileTablePreview
-              students={students.filter((person) =>
-                selectedStudentIds.includes(person.id)
-              )}
-              profiles={profiles}
-              profileFieldDefs={profileFieldDefs}
-              onSelectPerson={(personId) => {
-                setSelectedPersonId(personId);
-                setViewMode("card");
-              }}
-              onRemoveField={(key) => removeProfileFieldDef(key)}
-            />
+            {statusFilteredStudents.length ? (
+              <ProfileTablePreview
+                students={statusFilteredStudents.filter((person) =>
+                  selectedStudentIds.includes(person.id)
+                )}
+                profiles={profiles}
+                profileFieldDefs={profileFieldDefs}
+                onSelectPerson={(personId) => {
+                  setSelectedPersonId(personId);
+                  setViewMode("card");
+                }}
+                onRemoveField={(key) => removeProfileFieldDef(key)}
+              />
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-400 dark:border-slate-700">
+                {statusView === "graduated" ? "暂无毕业学生" : "当前没有学生"}
+              </div>
+            )}
           </div>
         ) : (
         <div className={cn("grid gap-4", isManager && "lg:grid-cols-[224px_minmax(0,1fr)]")}>
