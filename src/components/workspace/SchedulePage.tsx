@@ -22,6 +22,7 @@ interface SchedulePageProps {
   people: Person[];
   filters: FilterState;
   isManager: boolean;
+  currentUserId: string | null;
   holidays: Record<string, string>;
   selectedStudentIds: string[];
   onSelectedStudentIdsChange: (ids: string[]) => void;
@@ -77,6 +78,7 @@ export default function SchedulePage({
   people,
   filters,
   isManager,
+  currentUserId,
   holidays,
   selectedStudentIds,
   onSelectedStudentIdsChange,
@@ -184,6 +186,7 @@ export default function SchedulePage({
       {isManager && (
         <StudentCards
           students={memberStudents}
+          selfPerson={members.find((person) => person.id === currentUserId) ?? null}
           selectedStudentIds={selectedStudentIds}
           onSelectedStudentIdsChange={onSelectedStudentIdsChange}
           taskCounts={taskCounts}

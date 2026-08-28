@@ -135,6 +135,7 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
               people={state.people}
               filters={state.filters}
               isManager={isManager}
+              currentUserId={currentUserId}
               holidays={holidays}
               selectedStudentIds={state.selectedStudentIds}
               onSelectedStudentIdsChange={state.setSelectedStudentIds}

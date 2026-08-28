@@ -232,6 +232,10 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
         return s?.createdBy === currentUserId;
       });
     }
+    // 管理者本人也是一等选择项：默认与自己的学生一起勾选（自己的任务可管理/可切换显示）
+    if (isManager && currentUserId) {
+      defaultIds = [currentUserId, ...defaultIds];
+    }
     if (selectedStudentIds.length === 0 && defaultIds.length > 0) {
       setSelectedStudentIds(defaultIds);
     }
@@ -261,12 +265,10 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     }
     // ADMIN/TEACHER: see all tasks, then filter by selected students
 
-    // 按勾选学生过滤（本人任务始终可见）
+    // 按勾选成员过滤（管理者本人与学生对称：勾选谁就显示谁的任务）
     if (isManager) {
       const selected = new Set(selectedStudentIds);
-      result = result.filter(
-        (t) => t.assigneeId === currentUserId || selected.has(t.assigneeId)
-      );
+      result = result.filter((t) => selected.has(t.assigneeId));
     }
 
     // Status filter
