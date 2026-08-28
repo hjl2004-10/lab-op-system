@@ -267,6 +267,8 @@ export default function AIAssistant() {
       setStreamText(null);
       if (!open) setUnread(true);
       await loadConversations();
+      // 通知工作区刷新：AI 可能通过数据库工具改了任务/成员，重拉避免旧状态覆盖
+      window.dispatchEvent(new Event("gantt:ai-updated"));
     } catch (error) {
       setNotice({ type: "error", text: error instanceof Error ? error.message : "发送失败" });
       setStreamText(null);

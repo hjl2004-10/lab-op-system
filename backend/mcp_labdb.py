@@ -5,7 +5,7 @@
 - 数据连接独立且带 authorizer：users / sessions / ai_* / attachments / system_meta 表在连接层即被拒绝，
   密码哈希与会话数据对 AI 永不可见；
 - AI 只能调用下列类型化工具（无裸 SQL），每个工具按会话属主的角色与归属范围做服务端强制；
-- create_student（仅 admin）通过独立代码路径 INSERT 新账号（bcrypt、查重），绝不 UPDATE 已有行，
+- create_account（仅 admin）通过独立代码路径 INSERT 新账号（bcrypt、查重），绝不 UPDATE 已有行，
   任何工具都不提供修改已有账号密码的能力。
 """
 
@@ -383,11 +383,14 @@ def generate_password() -> str:
             return password
 
 
-def tool_create_student(db: LabDb, args: dict[str, Any]) -> str:
+def tool_create_account(db: LabDb, args: dict[str, Any]) -> str:
     if db.role != "admin":
-        raise ToolError("仅管理员可通过 AI 创建学生账号")
+        raise ToolError("仅管理员可通过 AI 创建账号")
     name = str(args.get("name") or "").strip()
     username = str(args.get("username") or "").strip()
+    role = str(args.get("role") or "student").strip()
+    if role not in ("student", "teacher"):
+        raise ToolError("role 仅支持 student 或 teacher（管理员账号请在系统的账户管理中创建）")
     if not name or not username:
         raise ToolError("缺少 name 或 username（学号）")
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,32}", username):
@@ -407,21 +410,22 @@ def tool_create_student(db: LabDb, args: dict[str, Any]) -> str:
             raise ToolError(f"账号 {username} 已存在（不可覆盖已有账号）")
         conn.execute(
             "INSERT INTO users (person_id, username, name, role, password_hash, active, "
-            "created_by, created_at, updated_at) VALUES (?, ?, ?, 'student', ?, 1, ?, ?, ?)",
-            (username, username, name, hash_password(password), db.person_id,
+            "created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+            (username, username, name, role, hash_password(password), db.person_id,
              datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()),
         )
     colors = PERSON_COLORS[len(payload.get("people", [])) % len(PERSON_COLORS)]
     payload.setdefault("people", []).append({
-        "id": username, "username": username, "name": name, "role": "student",
+        "id": username, "username": username, "name": name, "role": role,
         "color": colors[0], "lightColor": colors[1], "borderColor": colors[2],
         "textColor": "#FFFFFF", "order": len(payload["people"]), "status": "active",
         "classIds": [], "createdBy": db.person_id,
     })
     db.write_state(payload)
-    return json.dumps({"created": True, "name": name, "username": username,
+    role_label = "教师" if role == "teacher" else "学生"
+    return json.dumps({"created": True, "name": name, "username": username, "role": role,
                        "initial_password": password,
-                       "note": "初始密码仅此一次展示，请转告学生并建议尽快修改"},
+                       "note": f"{role_label}账号的初始密码仅此一次展示，请转告本人并建议尽快修改"},
                       ensure_ascii=False)
 
 
@@ -489,11 +493,12 @@ TOOLS: list[dict[str, Any]] = [
         }},
     },
     {
-        "name": "create_student",
-        "description": "（仅管理员）创建学生账号；初始密码缺省自动生成，仅创建时返回一次。绝不修改已有账号",
+        "name": "create_account",
+        "description": "（仅管理员）创建学生或教师账号；初始密码缺省自动生成，仅创建时返回一次。绝不修改已有账号",
         "inputSchema": {"type": "object", "required": ["name", "username"], "properties": {
             "name": {"type": "string"},
-            "username": {"type": "string", "description": "学号（同时作为登录账号）"},
+            "username": {"type": "string", "description": "学号/账号"},
+            "role": {"type": "string", "enum": ["student", "teacher"], "description": "缺省 student"},
             "password": {"type": "string", "description": "初始密码（可选，缺省自动生成）"},
         }},
     },
@@ -507,7 +512,7 @@ TOOL_FUNCTIONS = {
     "update_task": tool_update_task,
     "delete_task": tool_delete_task,
     "add_progress_record": tool_add_progress_record,
-    "create_student": tool_create_student,
+    "create_account": tool_create_account,
 }
 
 

@@ -1209,7 +1209,7 @@ MCP_TOOL_NAMES = [
     "mcp__labdb__update_task",
     "mcp__labdb__delete_task",
     "mcp__labdb__add_progress_record",
-    "mcp__labdb__create_student",
+    "mcp__labdb__create_account",
 ]
 
 
@@ -1237,9 +1237,9 @@ def build_system_prompt(user: dict[str, Any]) -> str:
     role_label = {"admin": "管理员", "teacher": "教师", "student": "学生"}[user["role"]]
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     account_line = (
-        "6. 创建学生账号的工具仅你当前服务对象为管理员时可用，初始密码只在创建时告知一次。\n"
+        "6. 创建学生/教师账号的工具仅你当前服务对象为管理员时可用，初始密码只在创建时告知一次。\n"
         if user["role"] == "admin"
-        else "6. 你没有创建账号的工具；需要建号时请引导用户找管理员在「系统管理 → 账户管理」操作。\n"
+        else "6. 你没有创建账号的工具；需要建学生或教师账号时请引导用户找管理员操作。\n"
     )
     return (
         f"你是 YANG11 实验室进度协作台的 AI 助手，正在为「{user['name']}」（{role_label}）服务，今天是 {today}。\n\n"

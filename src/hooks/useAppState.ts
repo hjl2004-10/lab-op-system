@@ -59,6 +59,9 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   const [accountDisabled, setAccountDisabled] = useState(authUser?.active === false);
   const hydratedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingRef = useRef(false);
+  // 水合时填充，供 AI 完成后/窗口聚焦时刷新工作区复用
+  const applyRemoteStateRef = useRef<(state: RemoteState) => void>(() => undefined);
 
   // -- 角色权限 --------------------------------------------------
   const isAdmin = authUser?.role === "admin";
@@ -115,6 +118,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
           : initialProfileFieldDefs
       );
     };
+    applyRemoteStateRef.current = applyState;
 
     api.getState()
       .then(async ({ state }) => {
@@ -159,6 +163,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       setSyncStatus("saving");
+      savingRef.current = true;
       api.saveState({ people, tasks, studentProfiles, profileFieldDefs, classes })
         .then(() => setSyncStatus("saved"))
         .catch((error: unknown) => {
@@ -172,12 +177,43 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
             setAccountDisabled(true);
           }
           setSyncStatus("error");
+        })
+        .finally(() => {
+          savingRef.current = false;
         });
     }, 650);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [authUser, people, tasks, studentProfiles, profileFieldDefs, classes, loadError, autoSave, accountDisabled]);
+
+  // -- 工作区刷新：AI 直接写库后（或窗口重新聚焦时）重拉服务端状态，
+  //    避免本地旧状态自动保存覆盖掉 AI 的修改 --
+  const refreshFromServer = useCallback(async () => {
+    if (!authUser || !hydratedRef.current || loadError || savingRef.current) return;
+    try {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      const { state } = await api.getState();
+      if (state) applyRemoteStateRef.current(state);
+    } catch {
+      // 拉取失败保持现状，下次事件再试
+    }
+  }, [authUser, loadError]);
+
+  useEffect(() => {
+    const handler = () => {
+      void refreshFromServer();
+    };
+    window.addEventListener("gantt:ai-updated", handler);
+    window.addEventListener("focus", handler);
+    return () => {
+      window.removeEventListener("gantt:ai-updated", handler);
+      window.removeEventListener("focus", handler);
+    };
+  }, [refreshFromServer]);
 
   // -- 管理员/老师勾选学生（主页学生专属卡片，跨任务/表格共享）--
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
