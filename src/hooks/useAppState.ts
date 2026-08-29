@@ -189,19 +189,48 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
 
   // -- 工作区刷新：AI 直接写库后（或窗口重新聚焦时）重拉服务端状态，
   //    避免本地旧状态自动保存覆盖掉 AI 的修改 --
+  // 注意：刷新前必须先把未落盘的本地修改冲刷到服务器，
+  // 否则刚新增的成员/任务会被拉回来的旧状态吞掉（幽灵账号 bug 的根因）。
+  const workspaceRef = useRef({ people, tasks, studentProfiles, profileFieldDefs, classes });
+  useEffect(() => {
+    workspaceRef.current = { people, tasks, studentProfiles, profileFieldDefs, classes };
+  }, [people, tasks, studentProfiles, profileFieldDefs, classes]);
+
   const refreshFromServer = useCallback(async () => {
     if (!authUser || !hydratedRef.current || loadError || savingRef.current) return;
-    try {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
+    const hadPending = saveTimerRef.current !== null;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (hadPending && autoSave && !accountDisabled) {
+      setSyncStatus("saving");
+      savingRef.current = true;
+      try {
+        await api.saveState(workspaceRef.current);
+        setSyncStatus("saved");
+      } catch (error) {
+        console.error("Unable to flush workspace before refresh", error);
+        if (
+          error instanceof ApiError &&
+          error.status === 403 &&
+          error.message.includes("停用")
+        ) {
+          setAccountDisabled(true);
+        }
+        setSyncStatus("error");
+        return; // 冲刷失败不刷新，避免旧状态覆盖本地修改
+      } finally {
+        savingRef.current = false;
       }
+    }
+    try {
       const { state } = await api.getState();
       if (state) applyRemoteStateRef.current(state);
     } catch {
       // 拉取失败保持现状，下次事件再试
     }
-  }, [authUser, loadError]);
+  }, [authUser, loadError, autoSave, accountDisabled]);
 
   useEffect(() => {
     const handler = () => {
