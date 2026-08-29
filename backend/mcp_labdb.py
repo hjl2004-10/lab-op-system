@@ -67,14 +67,18 @@ class LabDb:
         self.person_id = person_id
         self.name = name
         self.role = role
-        self.conn = sqlite3.connect(DB_PATH)
+        self.conn = sqlite3.connect(DB_PATH, timeout=10)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute("PRAGMA busy_timeout = 10000")
         self.conn.set_authorizer(_authorizer)
 
     # ---- payload 读写 ----
 
-    def read_state(self) -> dict[str, Any]:
+    def read_state(self, immediate: bool = False) -> dict[str, Any]:
+        if immediate:
+            # 写工具专用：取写锁后读最新数据，读-改-写全程原子（防并发丢更新）
+            self.conn.execute("BEGIN IMMEDIATE")
         row = self.conn.execute("SELECT payload FROM app_state WHERE id = 1").fetchone()
         if not row:
             raise ToolError("系统尚未初始化，没有可操作的数据")
@@ -244,7 +248,7 @@ def tool_create_task(db: LabDb, args: dict[str, Any]) -> str:
     name = str(args.get("name") or "").strip()
     if not name:
         raise ToolError("任务名称不能为空")
-    payload = db.read_state()
+    payload = db.read_state(immediate=True)
     assignee = db.resolve_assignee(payload, args.get("assignee"))
     is_private = bool(args.get("is_private"))
     if is_private and assignee.get("id") != db.person_id:
@@ -284,7 +288,7 @@ def tool_update_task(db: LabDb, args: dict[str, Any]) -> str:
     task_id = str(args.get("task_id") or "").strip()
     if not task_id:
         raise ToolError("缺少 task_id")
-    payload = db.read_state()
+    payload = db.read_state(immediate=True)
     task = db.find_visible_task(payload, task_id)
     updates: dict[str, Any] = {}
     if "name" in args and str(args.get("name") or "").strip():
@@ -326,7 +330,7 @@ def tool_delete_task(db: LabDb, args: dict[str, Any]) -> str:
     task_id = str(args.get("task_id") or "").strip()
     if not task_id:
         raise ToolError("缺少 task_id")
-    payload = db.read_state()
+    payload = db.read_state(immediate=True)
     db.find_visible_task(payload, task_id)  # 校验存在与权限
     payload["tasks"] = [t for t in payload.get("tasks", []) if t.get("id") != task_id]
     for index, task in enumerate(payload["tasks"]):
@@ -340,7 +344,7 @@ def tool_add_progress_record(db: LabDb, args: dict[str, Any]) -> str:
     current = str(args.get("current_progress") or "").strip()
     if not task_id or not current:
         raise ToolError("缺少 task_id 或 current_progress")
-    payload = db.read_state()
+    payload = db.read_state(immediate=True)
     max_record = 1000
     for task in payload.get("tasks", []):
         for record in task.get("progressHistory", []):
@@ -395,7 +399,7 @@ def tool_create_account(db: LabDb, args: dict[str, Any]) -> str:
         raise ToolError("缺少 name 或 username（学号）")
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,32}", username):
         raise ToolError("学号需为 2-32 位字母、数字、下划线或连字符")
-    payload = db.read_state()
+    payload = db.read_state(immediate=True)
     if any(p.get("username") == username or p.get("id") == username for p in payload.get("people", [])):
         raise ToolError(f"学号 {username} 已存在")
     password = str(args.get("password") or "").strip() or generate_password()
@@ -544,9 +548,17 @@ def handle(request: dict[str, Any], db: LabDb) -> dict[str, Any] | None:
             return {"jsonrpc": "2.0", "id": request_id, "result": {
                 "content": [{"type": "text", "text": text}]}}
         except ToolError as error:
+            try:
+                db.conn.rollback()
+            except sqlite3.Error:
+                pass
             return {"jsonrpc": "2.0", "id": request_id, "result": {
                 "content": [{"type": "text", "text": f"操作被拒绝：{error}"}], "isError": True}}
         except Exception as error:  # noqa: BLE001 — 工具层兜底，把错误文本回给 AI
+            try:
+                db.conn.rollback()
+            except sqlite3.Error:
+                pass
             return {"jsonrpc": "2.0", "id": request_id, "result": {
                 "content": [{"type": "text", "text": f"工具执行出错：{error}"}], "isError": True}}
     if request_id is not None:

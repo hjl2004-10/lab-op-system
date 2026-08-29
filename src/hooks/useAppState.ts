@@ -162,67 +162,81 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      setSyncStatus("saving");
-      savingRef.current = true;
-      api.saveState({ people, tasks, studentProfiles, profileFieldDefs, classes })
-        .then(() => setSyncStatus("saved"))
-        .catch((error: unknown) => {
-          console.error("Unable to save workspace", error);
-          if (
-            error instanceof ApiError &&
-            error.status === 403 &&
-            error.message.includes("停用")
-          ) {
-            // 管理员刚停用了本账号：切换到离线模式（只读）
-            setAccountDisabled(true);
-          }
-          setSyncStatus("error");
-        })
-        .finally(() => {
-          savingRef.current = false;
-        });
+      void flushWorkspaceRef.current();
     }, 650);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [authUser, people, tasks, studentProfiles, profileFieldDefs, classes, loadError, autoSave, accountDisabled]);
 
-  // -- 工作区刷新：AI 直接写库后（或窗口重新聚焦时）重拉服务端状态，
-  //    避免本地旧状态自动保存覆盖掉 AI 的修改 --
-  // 注意：刷新前必须先把未落盘的本地修改冲刷到服务器，
-  // 否则刚新增的成员/任务会被拉回来的旧状态吞掉（幽灵账号 bug 的根因）。
+  // -- 工作区数据镜像 + 立即冲刷 --
+  // 冲刷 = 把本地最新状态立即保存到服务器；关键写操作（增删成员）后立刻调用，
+  // 不等 650ms 防抖，收窄"账号已建但成员条目未落盘"的幽灵窗口。
   const workspaceRef = useRef({ people, tasks, studentProfiles, profileFieldDefs, classes });
   useEffect(() => {
     workspaceRef.current = { people, tasks, studentProfiles, profileFieldDefs, classes };
   }, [people, tasks, studentProfiles, profileFieldDefs, classes]);
 
+  // 刷新被"保存中"挡下时标记延后：保存一结束就补一次刷新，AI 的写入不丢
+  const pendingRefreshRef = useRef(false);
+  const refreshFromServerRef = useRef<() => Promise<void>>(async () => {});
+
+  const flushWorkspace = useCallback(async (): Promise<boolean> => {
+    if (!authUser || !hydratedRef.current || loadError || !autoSave || accountDisabled) {
+      return false;
+    }
+    if (savingRef.current) return false;
+    setSyncStatus("saving");
+    savingRef.current = true;
+    try {
+      await api.saveState(workspaceRef.current);
+      setSyncStatus("saved");
+      return true;
+    } catch (error) {
+      console.error("Unable to save workspace", error);
+      if (
+        error instanceof ApiError &&
+        error.status === 403 &&
+        error.message.includes("停用")
+      ) {
+        // 管理员刚停用了本账号：切换到离线模式（只读）
+        setAccountDisabled(true);
+      }
+      setSyncStatus("error");
+      return false;
+    } finally {
+      savingRef.current = false;
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        void refreshFromServerRef.current();
+      }
+    }
+  }, [authUser, loadError, autoSave, accountDisabled]);
+
+  const flushWorkspaceRef = useRef(flushWorkspace);
+  useEffect(() => {
+    flushWorkspaceRef.current = flushWorkspace;
+  }, [flushWorkspace]);
+
+  // -- 工作区刷新：AI 直接写库后（或窗口重新聚焦时）重拉服务端状态，
+  //    避免本地旧状态自动保存覆盖掉 AI 的修改 --
+  // 注意：刷新前必须先把未落盘的本地修改冲刷到服务器，
+  // 否则刚新增的成员/任务会被拉回来的旧状态吞掉（幽灵账号 bug 的根因）。
   const refreshFromServer = useCallback(async () => {
-    if (!authUser || !hydratedRef.current || loadError || savingRef.current) return;
+    if (!authUser || !hydratedRef.current || loadError) return;
+    if (savingRef.current) {
+      // 有保存在途：标记延后，保存完成后（finally）自动补刷新
+      pendingRefreshRef.current = true;
+      return;
+    }
     const hadPending = saveTimerRef.current !== null;
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    if (hadPending && autoSave && !accountDisabled) {
-      setSyncStatus("saving");
-      savingRef.current = true;
-      try {
-        await api.saveState(workspaceRef.current);
-        setSyncStatus("saved");
-      } catch (error) {
-        console.error("Unable to flush workspace before refresh", error);
-        if (
-          error instanceof ApiError &&
-          error.status === 403 &&
-          error.message.includes("停用")
-        ) {
-          setAccountDisabled(true);
-        }
-        setSyncStatus("error");
-        return; // 冲刷失败不刷新，避免旧状态覆盖本地修改
-      } finally {
-        savingRef.current = false;
-      }
+    if (hadPending) {
+      const ok = await flushWorkspaceRef.current();
+      if (!ok) return; // 冲刷失败不刷新，避免旧状态覆盖本地修改
     }
     try {
       const { state } = await api.getState();
@@ -230,7 +244,11 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     } catch {
       // 拉取失败保持现状，下次事件再试
     }
-  }, [authUser, loadError, autoSave, accountDisabled]);
+  }, [authUser, loadError]);
+
+  useEffect(() => {
+    refreshFromServerRef.current = refreshFromServer;
+  }, [refreshFromServer]);
 
   useEffect(() => {
     const handler = () => {
@@ -513,18 +531,38 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
         createdBy: currentUserId || undefined,
       };
       setPeople((prev) => [...prev, newPerson]);
+      // 立即冲刷：账号已在 users 表落盘，成员条目必须马上持久化，
+      // 收窄"窗口期事件吞掉待保存状态"造成幽灵账号的窗口
+      await new Promise((resolve) => setTimeout(resolve, 50)); // 等 workspaceRef 镜像同步
+      void flushWorkspaceRef.current();
     },
     [people, setPeople, currentUserId]
   );
 
   const deletePerson = useCallback(
     async (id: string) => {
-      await api.deleteUser(id);
-      // Also delete all tasks assigned to this person
+      // 先把本地移除并冲刷到服务器，确认成功后再删账号——
+      // 顺序反了的话：一旦 payload 保存失败而 users 行已删，
+      // 后续所有保存都会 422（存在未注册账户），保存永久卡死
+      const removedPerson = people.find((p) => p.id === id) ?? null;
+      const removedTasks = tasks.filter((t) => t.assigneeId === id);
       setTasks((prev) => prev.filter((t) => t.assigneeId !== id));
       setPeople((prev) => prev.filter((p) => p.id !== id));
+      await new Promise((resolve) => setTimeout(resolve, 50)); // 等 workspaceRef 镜像同步
+      const saved = await flushWorkspaceRef.current();
+      if (!saved && autoSave) {
+        // 冲刷失败（网络等）：恢复本地状态，避免界面与服务器不一致；用户稍后重试
+        if (removedPerson) {
+          setPeople((prev) => (prev.some((p) => p.id === id) ? prev : [...prev, removedPerson]));
+        }
+        if (removedTasks.length) {
+          setTasks((prev) => [...prev, ...removedTasks]);
+        }
+        throw new Error("网络异常，成员数据尚未同步，请稍后重试删除");
+      }
+      await api.deleteUser(id);
     },
-    [setPeople, setTasks]
+    [people, tasks, setPeople, setTasks, autoSave]
   );
 
   const updatePerson = useCallback(

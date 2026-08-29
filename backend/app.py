@@ -82,7 +82,7 @@ def validate_username(username: str) -> str:
 
 @contextmanager
 def database() -> Iterator[sqlite3.Connection]:
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(DB_PATH, timeout=10)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     try:
@@ -1730,6 +1730,8 @@ def save_state(
         raise HTTPException(status_code=403, detail="账号已停用，仅可离线查看，修改不会保存")
     incoming = sanitize_state(payload.model_dump())
     with database() as db:
+        # 读-合并-写全程持写锁，与 AI 的 MCP 写入互斥，防并发丢更新
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT * FROM app_state WHERE id = 1").fetchone()
         if not row and user["role"] not in ("admin", "teacher"):
             raise HTTPException(status_code=403, detail="请先由教师初始化系统")
