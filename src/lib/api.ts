@@ -7,6 +7,8 @@ export interface AuthUser {
   role: Role;
   /** false = 账号已停用（离线模式：可登录查看，修改不会保存） */
   active?: boolean;
+  /** 绑定手机号（找回密码用） */
+  phone?: string;
 }
 
 export interface RemoteState {
@@ -77,6 +79,22 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ old_password: oldPassword, password }),
     }),
+  forgotSend: (username: string, phone: string) =>
+    request<{ ok: true }>("/api/auth/forgot/send", {
+      method: "POST",
+      body: JSON.stringify({ username, phone }),
+    }),
+  forgotReset: (username: string, phone: string, code: string, password: string) =>
+    request<{ ok: true }>("/api/auth/forgot/reset", {
+      method: "POST",
+      body: JSON.stringify({ username, phone, code, password }),
+    }),
+  bindOwnPhone: (password: string, phone: string) =>
+    request<void>("/api/auth/phone", {
+      method: "PUT",
+      body: JSON.stringify({ password, phone }),
+    }),
+  listUserPhones: () => request<{ phones: Record<string, string> }>("/api/users/phones"),
   listSessions: () => request<{ sessions: SessionInfo[] }>("/api/sessions"),
   killSession: (tokenHash: string) =>
     request<void>(`/api/sessions/${tokenHash}`, { method: "DELETE" }),
@@ -98,6 +116,7 @@ export const api = {
     name: string;
     role: Role;
     password: string;
+    phone?: string;
   }) => request<{ user: AuthUser }>("/api/users", {
     method: "POST",
     body: JSON.stringify({
@@ -106,9 +125,13 @@ export const api = {
       name: account.name,
       role: account.role,
       password: account.password,
+      phone: account.phone || "",
     }),
   }),
-  updateUser: (personId: string, account: { username: string; name: string }) =>
+  updateUser: (
+    personId: string,
+    account: { username: string; name: string; phone?: string | null }
+  ) =>
     request<{ user: AuthUser }>(`/api/users/${encodeURIComponent(personId)}`, {
       method: "PUT",
       body: JSON.stringify(account),

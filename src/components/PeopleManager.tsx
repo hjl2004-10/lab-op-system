@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { api } from "@/lib/api";
 import type { Person, Role } from "@/types";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_-]{2,32}$/;
@@ -37,6 +38,7 @@ interface NewAccount {
   name: string;
   role: Role;
   password: string;
+  phone?: string;
 }
 
 interface PeopleManagerProps {
@@ -50,7 +52,10 @@ interface PeopleManagerProps {
   onOpenChange: (open: boolean) => void;
   onAdd: (account: NewAccount) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  onUpdateAccount: (personId: string, updates: { username: string; name: string }) => Promise<void>;
+  onUpdateAccount: (
+    personId: string,
+    updates: { username: string; name: string; phone?: string | null }
+  ) => Promise<void>;
   onSetPassword: (personId: string, password: string) => Promise<void>;
   onReorder: (personIds: string[]) => void;
   onArchive: (id: string, status: "active" | "archived") => void;
@@ -58,6 +63,8 @@ interface PeopleManagerProps {
 
 interface AccountRowProps {
   person: Person;
+  boundPhone: string;
+  onPhonesChanged: () => void;
   isCurrent: boolean;
   draggable: boolean;
   draggedId: string | null;
@@ -73,6 +80,8 @@ interface AccountRowProps {
 
 function AccountRow({
   person,
+  boundPhone,
+  onPhonesChanged,
   isCurrent,
   draggable,
   draggedId,
@@ -87,6 +96,7 @@ function AccountRow({
 }: AccountRowProps) {
   const [username, setUsername] = useState(person.username || person.id);
   const [name, setName] = useState(person.name);
+  const [phone, setPhone] = useState(boundPhone);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<"account" | "password" | "delete" | null>(null);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
@@ -101,7 +111,17 @@ function AccountRow({
     setBusy("account");
     setMessage(null);
     try {
-      await onUpdateAccount(person.id, { username: cleanUsername, name: cleanName });
+      const cleanPhone = phone.replace(/[^\d]/g, "");
+      if (cleanPhone && cleanPhone.length !== 11) {
+        setMessage({ type: "error", text: "手机号需为大陆 11 位" });
+        return;
+      }
+      await onUpdateAccount(person.id, {
+        username: cleanUsername,
+        name: cleanName,
+        phone: cleanPhone,
+      });
+      onPhonesChanged();
       setMessage({ type: "success", text: "账户信息已保存" });
     } catch (error) {
       setMessage({ type: "error", text: error instanceof Error ? error.message : "保存失败" });
@@ -182,6 +202,16 @@ function AccountRow({
           <label htmlFor={`name-${person.id}`}>姓名</label>
           <Input id={`name-${person.id}`} value={name} onChange={(event) => setName(event.target.value)} />
         </div>
+        <div>
+          <label htmlFor={`phone-${person.id}`}>手机号（找回密码）</label>
+          <Input
+            id={`phone-${person.id}`}
+            value={phone}
+            onChange={(event) => setPhone(event.target.value.replace(/[^\d]/g, "").slice(0, 11))}
+            placeholder="选填"
+            inputMode="numeric"
+          />
+        </div>
         <Button variant="outline" size="icon" onClick={saveAccount} disabled={busy !== null} title="保存账户信息">
           <Save size={16} />
         </Button>
@@ -255,12 +285,23 @@ export default function PeopleManager({
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [phones, setPhones] = useState<Record<string, string>>({});
   const [newAccount, setNewAccount] = useState<NewAccount>({
     username: "",
     name: "",
     role: "student",
     password: "",
+    phone: "",
   });
+
+  const loadPhones = useCallback(() => {
+    api.listUserPhones().then((data) => setPhones(data.phones)).catch(() => undefined);
+  }, []);
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) loadPhones();
+    onOpenChange(next);
+  };
 
   const visible = (person: Person) =>
     !restrictedToIds || restrictedToIds.has(person.id);
@@ -291,11 +332,17 @@ export default function PeopleManager({
       setCreateError("密码必须含大小写字母和数字，且至少 8 位");
       return;
     }
+    const cleanPhone = (account.phone || "").replace(/[^\d]/g, "");
+    if (cleanPhone && cleanPhone.length !== 11) {
+      setCreateError("手机号需为大陆 11 位");
+      return;
+    }
     setCreating(true);
     setCreateError("");
     try {
-      await onAdd(account);
-      setNewAccount({ username: "", name: "", role: "student", password: "" });
+      await onAdd({ ...account, phone: cleanPhone });
+      setNewAccount({ username: "", name: "", role: "student", password: "", phone: "" });
+      loadPhones();
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "账户创建失败");
     } finally {
@@ -330,6 +377,8 @@ export default function PeopleManager({
     <AccountRow
       key={person.id}
       person={person}
+      boundPhone={phones[person.id] || ""}
+      onPhonesChanged={loadPhones}
       isCurrent={person.id === currentUserId}
       draggable={person.status !== "archived" && person.id !== currentUserId}
       draggedId={draggedId}
@@ -345,7 +394,7 @@ export default function PeopleManager({
   )) : <div className="account-empty">暂无账户</div>;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="account-manager sm:max-w-3xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -381,6 +430,13 @@ export default function PeopleManager({
               onChange={(event) => setNewAccount((value) => ({ ...value, password: event.target.value }))}
               placeholder="初始密码"
               autoComplete="new-password"
+            />
+            <Input
+              value={newAccount.phone || ""}
+              onChange={(event) => setNewAccount((value) => ({ ...value, phone: event.target.value.replace(/[^\d]/g, "").slice(0, 11) }))}
+              placeholder="手机号（选填）"
+              inputMode="numeric"
+              aria-label="绑定手机号"
             />
             <Button onClick={createAccount} disabled={creating}>
               <UserPlus size={15} />{creating ? "创建中" : "创建账户"}

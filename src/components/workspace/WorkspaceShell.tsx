@@ -15,6 +15,7 @@ import {
   Menu,
   Moon,
   Settings,
+  Smartphone,
   Sun,
   X,
 } from "lucide-react";
@@ -156,6 +157,101 @@ function PasswordDialog({
   );
 }
 
+function AccountSettingsDialog({
+  initialPhone,
+  onOpenChange,
+}: {
+  initialPhone: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState(initialPhone);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  const submit = async () => {
+    if (busy) return;
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
+      setError("请输入大陆 11 位手机号");
+      return;
+    }
+    if (!password) {
+      setError("请输入当前密码验证");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.bindOwnPhone(password, phone);
+      setDone(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "绑定失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>账号设置</DialogTitle>
+          <DialogDescription>
+            绑定手机号后可通过短信验证码自助找回密码
+          </DialogDescription>
+        </DialogHeader>
+        {done ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+            手机号已绑定：{phone.slice(0, 3)}****{phone.slice(7)}
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">
+                手机号{initialPhone ? "（已绑定，可修改）" : ""}
+              </Label>
+              <Input
+                value={phone}
+                onChange={(event) => {
+                  setPhone(event.target.value.replace(/[^\d]/g, "").slice(0, 11));
+                  setError("");
+                }}
+                placeholder="11 位手机号"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">当前密码（验证身份）</Label>
+              <Input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submit();
+                }}
+              />
+            </div>
+            {error && <p className="text-xs text-red-500">{error}</p>}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+          {!done && (
+            <Button size="sm" onClick={submit} disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+              绑定手机号
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function WorkspaceShell({
   user,
   syncStatus,
@@ -171,6 +267,7 @@ export default function WorkspaceShell({
   );
   const [mobileOpen, setMobileOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("workspace-sidebar-collapsed", String(collapsed));
@@ -327,6 +424,10 @@ export default function WorkspaceShell({
                     学生档案
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuItem onSelect={() => setAccountOpen(true)}>
+                  <Smartphone />
+                  账号设置
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>
                   <KeyRound />
                   修改密码
@@ -346,6 +447,15 @@ export default function WorkspaceShell({
 
         <main className="workspace-content">{children}</main>
       </section>
+
+      {accountOpen && (
+        <AccountSettingsDialog
+          initialPhone={user.phone || ""}
+          onOpenChange={(next) => {
+            if (!next) setAccountOpen(false);
+          }}
+        />
+      )}
 
       {/* 关闭即卸载，表单状态自然重置 */}
       {passwordOpen && (

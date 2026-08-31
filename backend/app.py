@@ -19,6 +19,8 @@ from typing import Any, Iterator
 
 import bcrypt
 import openpyxl
+
+from backend import sms as sms_service
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -157,6 +159,16 @@ def initialize_database() -> None:
                 uploader TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sms_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT NOT NULL,
+                code TEXT NOT NULL,
+                purpose TEXT NOT NULL DEFAULT 'register',
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                consumed INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_sms_codes_phone ON sms_codes(phone, created_at);
             CREATE TABLE IF NOT EXISTS ai_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 enabled INTEGER NOT NULL DEFAULT 0,
@@ -330,6 +342,10 @@ def initialize_database() -> None:
                     "UPDATE app_state SET payload = ?, updated_at = ? WHERE id = 1",
                     (json.dumps(state_payload, ensure_ascii=False), now_iso()),
                 )
+        # 放在全部版本迁移之后：v3 会重建 users 表，phone 列必须最后补
+        user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+        if "phone" not in user_columns:
+            db.execute("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
         db.execute("DELETE FROM sessions WHERE expires_at <= ?", (now_iso(),))
 
 
@@ -358,6 +374,7 @@ class UserCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     role: str = "student"
     password: str = Field(min_length=8, max_length=128)
+    phone: str = Field(default="", max_length=20)
 
     @field_validator("username")
     @classmethod
@@ -380,6 +397,7 @@ class UserCreateRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     username: str
     name: str = Field(min_length=1, max_length=40)
+    phone: str | None = Field(default=None, max_length=20)
 
     @field_validator("username")
     @classmethod
@@ -403,6 +421,8 @@ def public_user(row: sqlite3.Row) -> dict[str, Any]:
         "role": row["role"],
         # 停用账户可登录进入离线模式（只读），删除后级联清会话彻底锁定
         "active": bool(row["active"]),
+        # 绑定手机号（找回密码用；仅本人/管理员场景可见此结构）
+        "phone": row["phone"] if "phone" in row.keys() else "",
     }
 
 
@@ -956,13 +976,16 @@ def create_user(
         raise HTTPException(status_code=403, detail="仅管理员或老师可新增账户")
     if user["role"] == "teacher" and payload.role != "student":
         raise HTTPException(status_code=403, detail="老师只能创建学生账户")
+    phone = payload.phone.strip()
+    if phone and not sms_service.PHONE_PATTERN.fullmatch(phone):
+        raise HTTPException(status_code=422, detail="手机号格式不正确（大陆 11 位）")
     with database() as db:
         try:
             db.execute(
                 """
                 INSERT INTO users
-                    (person_id, username, name, role, password_hash, active, created_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+                    (person_id, username, name, role, password_hash, active, created_by, created_at, updated_at, phone)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
                 """,
                 (
                     payload.person_id,
@@ -973,6 +996,7 @@ def create_user(
                     user["personId"],
                     now_iso(),
                     now_iso(),
+                    phone,
                 ),
             )
         except sqlite3.IntegrityError as error:
@@ -989,14 +1013,22 @@ def update_user(
 ) -> dict[str, Any]:
     if user["role"] == "student":
         raise HTTPException(status_code=403, detail="仅管理员或老师可修改账户")
+    if payload.phone is not None and payload.phone.strip() and not sms_service.PHONE_PATTERN.fullmatch(payload.phone.strip()):
+        raise HTTPException(status_code=422, detail="手机号格式不正确（大陆 11 位）")
     with database() as db:
         if user["role"] == "teacher" and not teacher_can_manage(db, user["personId"], person_id):
             raise HTTPException(status_code=403, detail="只能管理自己创建的学生账户")
         try:
-            result = db.execute(
-                "UPDATE users SET username = ?, name = ?, updated_at = ? WHERE person_id = ?",
-                (payload.username, payload.name.strip(), now_iso(), person_id),
-            )
+            if payload.phone is None:
+                result = db.execute(
+                    "UPDATE users SET username = ?, name = ?, updated_at = ? WHERE person_id = ?",
+                    (payload.username, payload.name.strip(), now_iso(), person_id),
+                )
+            else:
+                result = db.execute(
+                    "UPDATE users SET username = ?, name = ?, phone = ?, updated_at = ? WHERE person_id = ?",
+                    (payload.username, payload.name.strip(), payload.phone.strip(), now_iso(), person_id),
+                )
         except sqlite3.IntegrityError as error:
             raise HTTPException(status_code=409, detail="账号或学号已被使用") from error
         if result.rowcount == 0:
@@ -1410,6 +1442,142 @@ async def execute_ai_turn(turn: AiTurn) -> None:
         turn.emit("error", message=f"AI 内部错误：{error}")
     finally:
         ai_busy_conversations.discard(turn.conversation_id)
+
+
+class ForgotSendRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    phone: str = Field(min_length=5, max_length=20)
+
+
+class ForgotResetRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    phone: str = Field(min_length=5, max_length=20)
+    code: str = Field(min_length=6, max_length=6)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+
+class PhoneBindRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+    phone: str = Field(min_length=5, max_length=20)
+
+
+def sms_rate_check(db: sqlite3.Connection, phone: str) -> None:
+    """按手机号限流：60 秒重发冷却 + 滚动 24 小时 10 条（与参考实现一致）"""
+    now = time.time()
+    last = db.execute(
+        "SELECT created_at FROM sms_codes WHERE phone = ? ORDER BY id DESC LIMIT 1", (phone,)
+    ).fetchone()
+    if last and now - last["created_at"] < sms_service.RESEND_COOLDOWN_SECONDS:
+        remaining = int(sms_service.RESEND_COOLDOWN_SECONDS - (now - last["created_at"])) + 1
+        raise HTTPException(status_code=429, detail=f"发送过于频繁，请 {remaining} 秒后再试")
+    sent_today = db.execute(
+        "SELECT COUNT(*) FROM sms_codes WHERE phone = ? AND created_at > ?",
+        (phone, now - 86400),
+    ).fetchone()[0]
+    if sent_today >= sms_service.DAILY_LIMIT:
+        raise HTTPException(status_code=429, detail="该手机号今日发送次数已达上限，请明天再试")
+
+
+def find_user_by_phone(db: sqlite3.Connection, username: str, phone: str) -> sqlite3.Row | None:
+    """账号与绑定手机号同时匹配才返回；不匹配统一走上层模糊提示"""
+    row = db.execute(
+        "SELECT * FROM users WHERE username = ? COLLATE NOCASE", (username,)
+    ).fetchone()
+    if not row or row["phone"] != phone:
+        return None
+    return row
+
+
+@app.post("/api/auth/forgot/send")
+def forgot_send(payload: ForgotSendRequest) -> dict[str, Any]:
+    phone = payload.phone.strip()
+    if not sms_service.PHONE_PATTERN.fullmatch(phone):
+        raise HTTPException(status_code=422, detail="手机号格式不正确（大陆 11 位）")
+    with database() as db:
+        user = find_user_by_phone(db, payload.username.strip(), phone)
+        if user is None:
+            # 统一模糊提示：不泄露账号是否存在、手机号是否正确
+            raise HTTPException(status_code=422, detail="账号或绑定手机号不匹配，请联系管理员确认")
+        sms_rate_check(db, phone)
+        code = sms_service.generate_code()
+        try:
+            sms_service.send_verification_code(phone, code)  # 配置缺失/阿里云报错 → 500 携带提示，绝不降级
+        except sms_service.SmsError as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        now = time.time()
+        db.execute(
+            "INSERT INTO sms_codes (phone, code, purpose, created_at, expires_at, consumed) "
+            "VALUES (?, ?, 'reset', ?, ?, 0)",
+            (phone, code, now, now + sms_service.CODE_TTL_SECONDS),
+        )
+    return {"ok": True}
+
+
+@app.post("/api/auth/forgot/reset")
+def forgot_reset(payload: ForgotResetRequest) -> dict[str, Any]:
+    phone = payload.phone.strip()
+    code = payload.code.strip()
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        user = find_user_by_phone(db, payload.username.strip(), phone)
+        row = db.execute(
+            "SELECT * FROM sms_codes WHERE phone = ? AND purpose = 'reset' AND consumed = 0 "
+            "AND expires_at > ? ORDER BY id DESC LIMIT 1",
+            (phone, time.time()),
+        ).fetchone()
+        # 账号/手机号不匹配与验证码错误同一提示，避免探测
+        if user is None or row is None or row["code"] != code:
+            raise HTTPException(status_code=422, detail="验证码错误或已过期")
+        db.execute("UPDATE sms_codes SET consumed = 1 WHERE id = ?", (row["id"],))
+        db.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE person_id = ?",
+            (hash_password(payload.password), now_iso(), user["person_id"]),
+        )
+        # 重置成功注销全部会话（防旧会话残留）
+        db.execute("DELETE FROM sessions WHERE person_id = ?", (user["person_id"],))
+    return {"ok": True}
+
+
+@app.put("/api/auth/phone", status_code=status.HTTP_204_NO_CONTENT)
+def bind_own_phone(
+    payload: PhoneBindRequest, user: dict[str, Any] = Depends(current_user)
+) -> Response:
+    """登录用户自助绑定/修改手机号（验证当前密码）"""
+    phone = payload.phone.strip()
+    if not sms_service.PHONE_PATTERN.fullmatch(phone):
+        raise HTTPException(status_code=422, detail="手机号格式不正确（大陆 11 位）")
+    with database() as db:
+        row = db.execute(
+            "SELECT password_hash FROM users WHERE person_id = ?", (user["personId"],)
+        ).fetchone()
+        if not row or not verify_password(payload.password, row["password_hash"]):
+            raise HTTPException(status_code=403, detail="当前密码不正确")
+        db.execute(
+            "UPDATE users SET phone = ?, updated_at = ? WHERE person_id = ?",
+            (phone, now_iso(), user["personId"]),
+        )
+    return Response(status_code=204)
+
+
+@app.get("/api/users/phones")
+def list_user_phones(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    """管理员/教师查看账户绑定手机号（账户管理展示用；教师只见自己名下）"""
+    if user["role"] == "student":
+        raise HTTPException(status_code=403, detail="仅管理员或老师可查看")
+    with database() as db:
+        if user["role"] == "admin":
+            rows = db.execute("SELECT person_id, phone FROM users").fetchall()
+        else:
+            rows = db.execute(
+                "SELECT person_id, phone FROM users WHERE created_by = ? OR person_id = ?",
+                (user["personId"], user["personId"]),
+            ).fetchall()
+    return {"phones": {row["person_id"]: row["phone"] for row in rows}}
 
 
 class AiSettingsRequest(BaseModel):

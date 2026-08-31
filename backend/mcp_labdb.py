@@ -399,14 +399,18 @@ def tool_create_account(db: LabDb, args: dict[str, Any]) -> str:
         raise ToolError("缺少 name 或 username（学号）")
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,32}", username):
         raise ToolError("学号需为 2-32 位字母、数字、下划线或连字符")
-    payload = db.read_state(immediate=True)
+    payload = db.read_state()
     if any(p.get("username") == username or p.get("id") == username for p in payload.get("people", [])):
         raise ToolError(f"学号 {username} 已存在")
     password = str(args.get("password") or "").strip() or generate_password()
     if not re.fullmatch(r"(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,128}", password):
         raise ToolError("初始密码需至少 8 位且含大写、小写字母和数字")
-    # 账号写入走专用路径（独立连接、固定 INSERT，绝不修改已有行）
-    with sqlite3.connect(DB_PATH) as conn:
+    phone = str(args.get("phone") or "").strip()
+    if phone and not re.fullmatch(r"1[3-9]\d{9}", phone):
+        raise ToolError("手机号需为大陆 11 位号码")
+    # 账号写入走专用路径（独立连接、固定 INSERT，绝不修改已有行）。
+    # 必须在数据连接 BEGIN IMMEDIATE 之前完成，否则两个连接互相等锁。
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
         existing = conn.execute(
             "SELECT person_id FROM users WHERE username = ? COLLATE NOCASE", (username,)
         ).fetchone()
@@ -414,10 +418,14 @@ def tool_create_account(db: LabDb, args: dict[str, Any]) -> str:
             raise ToolError(f"账号 {username} 已存在（不可覆盖已有账号）")
         conn.execute(
             "INSERT INTO users (person_id, username, name, role, password_hash, active, "
-            "created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+            "created_by, created_at, updated_at, phone) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
             (username, username, name, role, hash_password(password), db.person_id,
-             datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()),
+             datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat(), phone),
         )
+    # 重新以写锁读最新 payload 再追加成员（覆盖上面的临时快照）
+    payload = db.read_state(immediate=True)
+    if any(p.get("username") == username or p.get("id") == username for p in payload.get("people", [])):
+        raise ToolError(f"学号 {username} 已存在")
     colors = PERSON_COLORS[len(payload.get("people", [])) % len(PERSON_COLORS)]
     payload.setdefault("people", []).append({
         "id": username, "username": username, "name": name, "role": role,
@@ -504,6 +512,7 @@ TOOLS: list[dict[str, Any]] = [
             "username": {"type": "string", "description": "学号/账号"},
             "role": {"type": "string", "enum": ["student", "teacher"], "description": "缺省 student"},
             "password": {"type": "string", "description": "初始密码（可选，缺省自动生成）"},
+            "phone": {"type": "string", "description": "绑定手机号，大陆 11 位（可选，用于找回密码）"},
         }},
     },
 ]

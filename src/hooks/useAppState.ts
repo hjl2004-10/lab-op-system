@@ -510,6 +510,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
       role: Role;
       password: string;
       classIds?: string[];
+      phone?: string;
     }) => {
       const activePeople = people.filter((p) => p.status !== "archived");
       const index = activePeople.length;
@@ -575,7 +576,10 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   );
 
   const updateAccount = useCallback(
-    async (personId: string, updates: { username: string; name: string }) => {
+    async (
+      personId: string,
+      updates: { username: string; name: string; phone?: string | null }
+    ) => {
       await api.updateUser(personId, updates);
       setPeople((prev) =>
         prev.map((person) =>
