@@ -1241,6 +1241,7 @@ MCP_TOOL_NAMES = [
     "mcp__labdb__update_task",
     "mcp__labdb__delete_task",
     "mcp__labdb__add_progress_record",
+    "mcp__labdb__update_student_profile",
     "mcp__labdb__create_account",
 ]
 
@@ -1269,9 +1270,9 @@ def build_system_prompt(user: dict[str, Any]) -> str:
     role_label = {"admin": "管理员", "teacher": "教师", "student": "学生"}[user["role"]]
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     account_line = (
-        "6. 创建学生/教师账号的工具仅你当前服务对象为管理员时可用，初始密码只在创建时告知一次。\n"
+        "7. 创建学生/教师账号的工具仅你当前服务对象为管理员时可用，初始密码只在创建时告知一次。\n"
         if user["role"] == "admin"
-        else "6. 你没有创建账号的工具；需要建学生或教师账号时请引导用户找管理员操作。\n"
+        else "7. 你没有创建账号的工具；需要建学生或教师账号时请引导用户找管理员操作。\n"
     )
     return (
         f"你是 YANG11 实验室进度协作台的 AI 助手，正在为「{user['name']}」（{role_label}）服务，今天是 {today}。\n\n"
@@ -1282,8 +1283,10 @@ def build_system_prompt(user: dict[str, Any]) -> str:
         "3. 只能操作当前用户权限范围内的数据，越权的工具调用会被服务端拒绝；被拒绝时向用户解释权限边界。\n"
         "4. 需要了解数据时先用 list_students / list_tasks 查询，再基于真实数据回答，不要凭空编造。\n"
         "5. 写操作完成后用一两句话向用户确认结果（任务 ID、负责人等）。\n"
+        "6. 学生档案字段（性别、MBTI、专业、学院、入学年份等）的当前值与可选值见 list_students 返回的 "
+        "profile / profileFields；修改用 update_student_profile，教师只能改名下学生、学生只能改自己。\n"
         f"{account_line}"
-        "7. 日期一律使用 YYYY-MM-DD。"
+        "8. 日期一律使用 YYYY-MM-DD。"
     )
 
 

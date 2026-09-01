@@ -183,17 +183,28 @@ def tool_list_students(db: LabDb, args: dict[str, Any]) -> str:
     counts: dict[str, int] = {}
     for task in payload.get("tasks", []):
         counts[task.get("assigneeId", "")] = counts.get(task.get("assigneeId", ""), 0) + 1
+    profiles = {p.get("personId"): p.get("data", {})
+                for p in payload.get("studentProfiles", [])}
     students = [
         {
             "id": p.get("id"), "name": p.get("name"),
             "username": p.get("username", ""), "role": p.get("role"),
             "tasks": counts.get(p.get("id", ""), 0),
+            "profile": profiles.get(p.get("id"), {}),
         }
         for p in scope["people"]
     ]
+    # 预设字段定义随结果返回：AI 可据此得知档案有哪些字段与下拉可选值
+    field_defs = [
+        {"key": d.get("key"), "label": d.get("label"), "type": d.get("type"),
+         "options": d.get("options", [])}
+        for d in payload.get("profileFieldDefs", [])
+    ]
     if db.role == "student":
-        return json.dumps({"self": students[0] if students else None}, ensure_ascii=False)
-    return json.dumps({"students": students}, ensure_ascii=False)
+        return json.dumps({"self": students[0] if students else None,
+                           "profileFields": field_defs}, ensure_ascii=False)
+    return json.dumps({"students": students, "profileFields": field_defs},
+                      ensure_ascii=False)
 
 
 def tool_list_tasks(db: LabDb, args: dict[str, Any]) -> str:
@@ -378,6 +389,67 @@ def tool_add_progress_record(db: LabDb, args: dict[str, Any]) -> str:
                        "date": record["date"]}, ensure_ascii=False)
 
 
+def tool_update_student_profile(db: LabDb, args: dict[str, Any]) -> str:
+    """修改学生档案的公开字段（性别/MBTI/专业等 data 字段）。
+
+    权限与网页端一致：教师/管理员只能改自己名下学生的档案，学生只能改自己的；
+    adminOnlyData（教师专用面板）不在本工具范围内，任何工具都不改账号密码。
+    """
+    fields = args.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        raise ToolError("缺少 fields（要修改的档案字段，如 {\"gender\": \"男\", \"mbti\": \"INTJ\"}）")
+    payload = db.read_state(immediate=True)
+    people = payload.get("people", [])
+    profiles = payload.setdefault("studentProfiles", [])
+
+    # 解析目标学生：教师/管理员=名下学生；学生=自己（明确指定他人则拒绝）
+    if db.role == "student":
+        target = next((p for p in people if p.get("id") == db.person_id), None)
+        if target is None:
+            raise ToolError("找不到你的账号信息")
+        student_arg = str(args.get("student") or "").strip()
+        if student_arg and student_arg not in (target.get("id"), target.get("name"), target.get("username")):
+            raise ToolError(f"学生只能修改自己的档案，不能指定「{student_arg}」")
+    else:
+        student = str(args.get("student") or "").strip()
+        if not student:
+            raise ToolError("缺少 student（学生姓名或学号）")
+        task_owners = manager_task_scope(people, db.viewer())
+        target = next(
+            (p for p in people if p.get("id") in task_owners and p.get("id") != db.person_id
+             and student in (p.get("id"), p.get("name"), p.get("username"))),
+            None,
+        )
+        if target is None:
+            raise ToolError(f"学生「{student}」不存在或不在你的权限范围内（可用学生见 list_students 结果）")
+
+    # 字段合法性：key 必须是系统预设字段；select 字段取值必须在可选项内
+    defs = payload.get("profileFieldDefs", [])
+    defs_by_key = {d.get("key"): d for d in defs}
+    cleaned: dict[str, str] = {}
+    for key, value in fields.items():
+        key = str(key).strip()
+        definition = defs_by_key.get(key) if defs else None
+        if defs and definition is None:
+            valid = "、".join(f"{d.get('key')}({d.get('label')})" for d in defs)
+            raise ToolError(f"「{key}」不是系统定义的档案字段，可用字段：{valid}")
+        text = "" if value is None else str(value).strip()
+        options = (definition or {}).get("options") or []
+        if options and text and text not in options:
+            raise ToolError(f"字段「{definition.get('label')}」的可选值为：{'、'.join(options)}，收到：{text}")
+        cleaned[key] = text
+
+    profile = next((p for p in profiles if p.get("personId") == target.get("id")), None)
+    if profile is None:
+        profile = {"personId": target.get("id"), "personName": target.get("name", ""),
+                   "data": {}, "adminOnlyData": {"fields": [], "values": {}, "note": ""}}
+        profiles.append(profile)
+    profile.setdefault("data", {}).update(cleaned)
+    db.write_state(payload)
+    return json.dumps({"updated": True, "student": target.get("name"),
+                       "fields": cleaned}, ensure_ascii=False)
+
+
 def generate_password() -> str:
     alphabet = string.ascii_letters + string.digits
     while True:
@@ -505,6 +577,16 @@ TOOLS: list[dict[str, Any]] = [
         }},
     },
     {
+        "name": "update_student_profile",
+        "description": "修改学生档案的公开字段（性别、MBTI、专业、学院、入学年份等）；"
+                       "教师/管理员只能改自己名下学生，学生只能改自己；不改账号密码与教师专用面板",
+        "inputSchema": {"type": "object", "required": ["fields"], "properties": {
+            "student": {"type": "string", "description": "学生姓名或学号（教师/管理员必填；学生改自己可省略）"},
+            "fields": {"type": "object", "description": "字段键值对，如 {\"gender\": \"男\", \"mbti\": \"INTJ\", \"major\": \"软件工程\"}；"
+                                                         "字段与下拉可选值以 list_students 返回的 profileFields 为准"},
+        }},
+    },
+    {
         "name": "create_account",
         "description": "（仅管理员）创建学生或教师账号；初始密码缺省自动生成，仅创建时返回一次。绝不修改已有账号",
         "inputSchema": {"type": "object", "required": ["name", "username"], "properties": {
@@ -525,6 +607,7 @@ TOOL_FUNCTIONS = {
     "update_task": tool_update_task,
     "delete_task": tool_delete_task,
     "add_progress_record": tool_add_progress_record,
+    "update_student_profile": tool_update_student_profile,
     "create_account": tool_create_account,
 }
 
