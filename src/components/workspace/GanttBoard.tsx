@@ -61,7 +61,7 @@ interface HeaderColumn {
   holidayName?: string;
 }
 
-const ROW_HEIGHT = 56;
+const ROW_HEIGHT = 64;
 // 粘性表头高度（index.css .gantt-board-header 同步维护）：
 // 背景层/今天线从表头下沿开始画，避免被表头盖住
 const HEADER_HEIGHT = 78;
@@ -350,7 +350,8 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
                   {column.holidayName && <em>{column.holidayName}</em>}
                 </div>
               ))}
-              {/* 「今天」标记常驻表头顶部：随表头粘性固定在页面最上方 */}
+              {/* 「今天」标记常驻表头顶部：随表头粘性固定在页面最上方，
+                  其正下方有与红线同列的连接段，标记与红线视觉上连成一体 */}
               {timeline.todayOffset !== null && (
                 <div
                   className="gantt-board-today-flag"
@@ -358,6 +359,12 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
                 >
                   今天
                 </div>
+              )}
+              {timeline.todayOffset !== null && (
+                <div
+                  className="gantt-board-today-line-header"
+                  style={{ left: timeline.todayOffset }}
+                />
               )}
             </div>
           )}

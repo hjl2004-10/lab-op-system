@@ -551,17 +551,18 @@
 .dark .gantt-board-day-background.weekend { background: rgba(30, 41, 59, .4); }
 .dark .gantt-board-day-background.holiday { background: rgba(127, 29, 29, .15); }
 .gantt-board-today-line { position: absolute; z-index: 15; top: 0; bottom: 0; width: 2px; background: var(--c-danger); }
-.gantt-board-today-flag { position: absolute; top: 7px; transform: translateX(-50%); padding: 3px 14px; border-radius: 999px; color: #fff; background: var(--c-danger); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-tight); white-space: nowrap; pointer-events: none; box-shadow: 0 2px 6px rgba(239, 68, 68, .45); z-index: 45; }
+.gantt-board-today-flag { position: absolute; top: 6px; transform: translateX(-50%); padding: 3px 14px; border-radius: 999px; color: #fff; background: var(--c-danger); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-tight); white-space: nowrap; pointer-events: none; box-shadow: 0 2px 6px rgba(239, 68, 68, .45); z-index: 45; }
+.gantt-board-today-line-header { position: absolute; top: 38px; bottom: 0; width: 2px; background: var(--c-danger); z-index: 44; pointer-events: none; }
 
 /* 行体系：行 / 任务列单元格 / 时间轴单元格统一 56px */
-.gantt-board-row { position: relative; z-index: 10; height: 56px; display: flex; }
+.gantt-board-row { position: relative; z-index: 10; height: 64px; display: flex; }
 .gantt-board-row.dragging { opacity: .5; }
 .gantt-board-row.completed { opacity: .6; }
 .gantt-board-task-cell {
   position: sticky;
   z-index: 20;
   left: 0;
-  height: 56px;
+  height: 64px;
   flex: 0 0 auto;
   padding: 0 14px;
   display: flex;
@@ -587,7 +588,7 @@
 .gantt-board-row.completed .gantt-board-task-copy strong { text-decoration: line-through; }
 .gantt-board-task-copy > span { display: flex; align-items: center; gap: 10px; color: var(--c-text-4); font-size: var(--fs-caption); line-height: var(--lh-tight); }
 .gantt-board-task-copy em { font-style: normal; font-weight: 500; }
-.gantt-board-timeline-cell { position: relative; height: 56px; flex: 0 0 auto; border-bottom: 1px solid var(--c-border-soft); }
+.gantt-board-timeline-cell { position: relative; height: 64px; flex: 0 0 auto; border-bottom: 1px solid var(--c-border-soft); }
 .dark .gantt-board-timeline-cell { border-color: var(--c-border-soft); }
 .gantt-board-empty { height: 220px; display: grid; place-items: center; color: var(--c-text-4); font-size: var(--fs-body); }
 
