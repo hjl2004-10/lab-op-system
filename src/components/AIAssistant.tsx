@@ -338,7 +338,7 @@ export default function AIAssistant() {
               {status && (
                 <span
                   className={cn(
-                    "ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-normal",
+                    "ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[18px] font-normal",
                     usable
                       ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-300"
                       : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
@@ -478,7 +478,7 @@ export default function AIAssistant() {
                 {attachments.map((file, index) => (
                   <span
                     key={index}
-                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[12px] dark:border-slate-700 dark:bg-slate-800"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[18px] dark:border-slate-700 dark:bg-slate-800"
                   >
                     <Paperclip className="size-2.5" />
                     {file.name}
