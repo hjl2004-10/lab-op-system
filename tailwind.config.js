@@ -56,6 +56,13 @@ module.exports = {
         sm: "calc(var(--radius) - 4px)",
         xs: "calc(var(--radius) - 6px)",
       },
+      // 全站字号整体上调：最小 12px 起步（text-xs 13px），
+      // 组件标准文本 text-sm 15px，配合 index.css 的 px 重映射
+      fontSize: {
+        xs: ["13px", { lineHeight: "1.4" }],
+        sm: ["15px", { lineHeight: "1.5" }],
+        base: ["16px", { lineHeight: "1.6" }],
+      },
       boxShadow: {
         xs: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
       },

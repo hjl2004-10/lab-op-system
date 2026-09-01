@@ -70,7 +70,7 @@ export default function StudentCards({
         {taskCounts && (
           <span
             className={cn(
-              "flex min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-medium",
+              "flex min-w-[18px] items-center justify-center rounded-full px-1 text-[12px] font-medium",
               checked
                 ? "bg-white/25 text-white"
                 : "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300"
@@ -91,9 +91,9 @@ export default function StudentCards({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-            {selfPerson ? "成员（含我自己）" : "学生"}
+            {selfPerson ? "成员" : "学生"}
           </span>
-          <span className="text-[10px] text-slate-400">
+          <span className="text-[12px] text-slate-400">
             已选 {selectedCount}/{selectable.length}
           </span>
         </div>
