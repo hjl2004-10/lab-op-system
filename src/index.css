@@ -232,15 +232,19 @@
 
 /* ===== 账户管理（系统管理弹窗内） ===== */
 .account-manager { border-radius: 8px; }
-.account-create { padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
-.dark .account-create { border-color: #334155; background: #1e293b; }
-.account-create-title { margin-bottom: 10px; display: flex; align-items: center; gap: 7px; color: #334155; font-size: 13px; }
-.dark .account-create-title { color: #cbd5e1; }
-.account-create-grid { display: grid; grid-template-columns: 1.15fr 1fr 110px 1.15fr auto; gap: 8px; align-items: center; }
-.account-create-grid select { height: 36px; padding: 0 10px; border: 1px solid hsl(var(--input)); border-radius: 6px; color: inherit; background: hsl(var(--background)); font-size: 13px; }
-.password-rules { min-height: 22px; margin-top: 9px; display: flex; gap: 6px; }
-.password-rules span { padding: 2px 7px; border: 1px solid #e2e8f0; border-radius: 999px; color: #94a3b8; font-size: 11px; }
-.password-rules span.met { border-color: #7dd3fc; color: #0284c7; background: #f0f9ff; }
+.account-manager > [data-slot="dialog-header"] { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+.account-create-btn { flex: 0 0 auto; }
+.role-card { padding: 10px 8px; display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+.role-card:hover { border-color: #94a3b8; }
+.role-card strong { font-size: 13px; }
+.role-card span { color: #94a3b8; font-size: 11px; line-height: 1.4; }
+.role-card.role-card-selected { border-color: hsl(var(--primary)); background: hsl(var(--accent)); box-shadow: 0 0 0 1px hsl(var(--primary)) inset; }
+.role-card.role-card-selected span { color: hsl(var(--primary)); }
+.dark .role-card { border-color: #334155; background: #0f172a; }
+.password-rule { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border: 1px solid #e2e8f0; border-radius: 999px; color: #94a3b8; font-size: 11px; }
+.password-rule.met { border-color: #34d399; color: #059669; background: #ecfdf5; }
+.dark .password-rule { border-color: #334155; }
+.dark .password-rule.met { border-color: #065f46; background: #052e22; }
 .account-list { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
 .dark .account-list { border-color: #334155; }
 .account-row { position: relative; padding: 13px; border-bottom: 1px solid #f1f5f9; background: #fff; transition: opacity .15s, background .15s; }
@@ -253,7 +257,7 @@
 .account-identity > div { min-width: 0; display: flex; flex-direction: column; }
 .account-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .account-identity span { color: #94a3b8; font-size: 12px; }
-.account-fields { margin: 11px 0 8px 57px; display: grid; grid-template-columns: minmax(130px, .9fr) minmax(130px, 1fr) 36px; gap: 8px; align-items: end; }
+.account-fields { margin: 11px 0 8px 57px; display: grid; grid-template-columns: minmax(120px, .9fr) minmax(110px, .8fr) minmax(130px, 1fr) 36px; gap: 8px; align-items: end; }
 .account-fields label { display: block; margin-bottom: 4px; color: #64748b; font-size: 12px; }
 .account-security { margin-left: 57px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .account-password { min-width: 0; flex: 1; display: grid; grid-template-columns: 20px minmax(130px, 240px) auto; align-items: center; gap: 7px; color: #64748b; }
@@ -263,9 +267,9 @@
 .account-empty { padding: 32px; color: #94a3b8; text-align: center; font-size: 13px; }
 
 @media (max-width: 760px) {
-  .account-create-grid { grid-template-columns: 1fr 1fr; }
-  .account-create-grid button { grid-column: 1 / -1; }
-  .account-fields { margin-left: 0; grid-template-columns: 1fr; }
+  .role-card span { display: none; }
+  .account-fields { margin-left: 0; grid-template-columns: 1fr 1fr; }
+  .account-fields > div:last-of-type { grid-column: 1 / -1; }
   .account-security { margin-left: 0; align-items: flex-end; }
   .account-password { grid-template-columns: 20px 1fr; }
   .account-password button { grid-column: 2; }
