@@ -475,14 +475,14 @@
 .gantt-board-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; border: 0; background: transparent; cursor: col-resize; }
 .gantt-board-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; background: #cbd5e1; }
 .gantt-board-resize:hover::after { width: 2px; left: 1px; background: #0284c7; }
-.gantt-board-date-header { height: 78px; flex: 0 0 auto; display: flex; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+.gantt-board-date-header { position: relative; height: 78px; flex: 0 0 auto; display: flex; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
 .dark .gantt-board-date-header { border-color: #334155; background: #1e293b; }
 .gantt-board-date-cell { height: 78px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #e2e8f0; color: #64748b; background: #f8fafc; font-size: 18px; }
 .gantt-board-date-cell small { margin-top: 1px; color: #94a3b8; font-size: 18px; }
 .gantt-board-date-cell em { color: #f87171; font-size: 18px; font-style: normal; }
 .gantt-board-date-cell.weekend { background: #f1f5f9; }
 .gantt-board-date-cell.holiday { background: #fef2f2; }
-.gantt-board-date-cell.today { color: #ef4444; font-weight: 700; }
+.gantt-board-date-cell.today { color: #ef4444; font-weight: 700; background: rgba(239, 68, 68, .07); padding-top: 30px; }
 .dark .gantt-board-date-cell { border-color: #334155; color: #cbd5e1; background: #1e293b; }
 .dark .gantt-board-date-cell.weekend { background: #172033; }
 .dark .gantt-board-date-cell.holiday { background: #2a1518; }
@@ -493,9 +493,9 @@
 .dark .gantt-board-day-background { border-color: rgba(51, 65, 85, .5); }
 .dark .gantt-board-day-background.weekend { background: rgba(30, 41, 59, .4); }
 .dark .gantt-board-day-background.holiday { background: rgba(127, 29, 29, .15); }
-.gantt-board-today-line { position: absolute; z-index: 5; top: 0; bottom: 0; width: 1px; background: #ef4444; }
-.gantt-board-today-line span { position: absolute; top: 4px; left: 4px; padding: 2px 7px; border-radius: 3px; color: #fff; background: #ef4444; font-size: 18px; white-space: nowrap; }
-.gantt-board-row { position: relative; z-index: 10; height: 48px; display: flex; }
+.gantt-board-today-line { position: absolute; z-index: 15; top: 0; bottom: 0; width: 2px; background: #ef4444; }
+.gantt-board-today-flag { position: absolute; top: 7px; transform: translateX(-50%); padding: 2px 12px; border-radius: 999px; color: #fff; background: #ef4444; font-size: 18px; font-weight: 600; line-height: 1.35; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 3px rgba(239, 68, 68, .4); z-index: 45; }
+.gantt-board-row { position: relative; z-index: 10; height: 56px; display: flex; }
 .gantt-board-row.dragging { opacity: .5; }
 .gantt-board-row.completed { opacity: .6; }
 .gantt-board-task-cell {

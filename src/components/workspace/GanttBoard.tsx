@@ -61,7 +61,10 @@ interface HeaderColumn {
   holidayName?: string;
 }
 
-const ROW_HEIGHT = 48;
+const ROW_HEIGHT = 56;
+// 粘性表头高度（index.css .gantt-board-header 同步维护）：
+// 背景层/今天线从表头下沿开始画，避免被表头盖住
+const HEADER_HEIGHT = 78;
 const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
 
 function getDayWidth(viewMode: GanttBoardProps["viewMode"]): number {
@@ -347,6 +350,15 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
                   {column.holidayName && <em>{column.holidayName}</em>}
                 </div>
               ))}
+              {/* 「今天」标记常驻表头顶部：随表头粘性固定在页面最上方 */}
+              {timeline.todayOffset !== null && (
+                <div
+                  className="gantt-board-today-flag"
+                  style={{ left: timeline.todayOffset }}
+                >
+                  今天
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -356,7 +368,7 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
             className="gantt-board-background"
             style={{
               left: taskColumnWidth,
-              top: ROW_HEIGHT,
+              top: HEADER_HEIGHT,
               width: timeline.totalWidth,
               height: tasks.length * ROW_HEIGHT,
             }}
@@ -377,9 +389,7 @@ const GanttBoard = forwardRef<GanttBoardHandle, GanttBoardProps>(function GanttB
               <div
                 className="gantt-board-today-line"
                 style={{ left: timeline.todayOffset }}
-              >
-                <span>今天</span>
-              </div>
+              />
             )}
           </div>
         )}

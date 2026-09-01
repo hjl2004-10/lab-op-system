@@ -20,7 +20,7 @@ export default function TaskBar({ task, person, left, width, onClick }: TaskBarP
 
   return (
     <div
-      className="absolute top-1 h-[34px] rounded-md shadow-sm cursor-pointer overflow-hidden"
+      className="absolute top-1 h-[42px] rounded-md shadow-sm cursor-pointer overflow-hidden"
       style={{ left: `${left}px`, width: `${barWidth}px` }}
       onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
