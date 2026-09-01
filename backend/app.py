@@ -1049,9 +1049,28 @@ def delete_user(
     with database() as db:
         if user["role"] == "teacher" and not teacher_can_manage(db, user["personId"], person_id):
             raise HTTPException(status_code=403, detail="只能管理自己创建的学生账户")
+        # 同一事务内删除账号并清掉 payload 中的成员/任务/档案：
+        # 只删 users 行的话会留下"幽灵成员"，其 id 不在 users 表中，
+        # 会把之后每一次状态保存都变成 422，全站写入被卡死
+        db.execute("BEGIN IMMEDIATE")
         result = db.execute("DELETE FROM users WHERE person_id = ?", (person_id,))
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="账户不存在")
+        row = db.execute("SELECT payload FROM app_state WHERE id = 1").fetchone()
+        if row:
+            payload = json.loads(row["payload"])
+            had_person = any(p.get("id") == person_id for p in payload.get("people", []))
+            payload["people"] = [p for p in payload.get("people", []) if p.get("id") != person_id]
+            payload["tasks"] = [t for t in payload.get("tasks", []) if t.get("assigneeId") != person_id]
+            payload["studentProfiles"] = [
+                s for s in payload.get("studentProfiles", []) if s.get("personId") != person_id
+            ]
+            if had_person:
+                db.execute(
+                    "UPDATE app_state SET payload = ?, revision = revision + 1, "
+                    "updated_at = ?, updated_by = ? WHERE id = 1",
+                    (json.dumps(payload, ensure_ascii=False), now_iso(), user["personId"]),
+                )
     return Response(status_code=204)
 
 
@@ -1912,17 +1931,42 @@ def save_state(
             next_state = merge_manager_state(
                 stored, incoming, user, admin_fields=(user["role"] == "admin")
             )
-            # 防注入：合并结果中的成员必须已存在于 users 表（通过 create_user 建的）
             existing_ids = {
                 r["person_id"] for r in db.execute("SELECT person_id FROM users").fetchall()
             }
-            for person in next_state["people"]:
-                if person.get("id") not in existing_ids:
-                    raise HTTPException(status_code=422, detail="存在未注册账户")
-            sync_users(db, next_state["people"])
+            # 防注入：只拦截"凭空新增"的未注册成员（users 表与存量 payload 都没有）。
+            # 存量幽灵成员的回声不拦（见下方自愈），否则一个幽灵会卡死全站所有保存
+            stored_ids = {p.get("id") for p in stored.get("people", [])}
+            for person in incoming.get("people", []):
+                pid = person.get("id")
+                if pid not in existing_ids and pid not in stored_ids:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"成员「{person.get('name') or pid}」尚未注册账户，请先在账户管理中创建",
+                    )
         else:
             stored = json.loads(row["payload"])
             next_state = merge_member_state(stored, incoming, user["personId"])
+            existing_ids = {
+                r["person_id"] for r in db.execute("SELECT person_id FROM users").fetchall()
+            }
+
+        # 自愈：清除幽灵成员（users 行已不存在的存量条目）及其任务/档案。
+        # 必须放在 sync_users 之前，否则 sync 会为幽灵补建 users 行、删除被撤销
+        ghost_ids = {p.get("id") for p in next_state.get("people", [])} - existing_ids
+        if ghost_ids:
+            next_state["people"] = [
+                p for p in next_state["people"] if p.get("id") not in ghost_ids
+            ]
+            next_state["tasks"] = [
+                t for t in next_state.get("tasks", []) if t.get("assigneeId") not in ghost_ids
+            ]
+            next_state["studentProfiles"] = [
+                s for s in next_state.get("studentProfiles", [])
+                if s.get("personId") not in ghost_ids
+            ]
+        if user["role"] in ("admin", "teacher"):
+            sync_users(db, next_state["people"])
 
         revision = (row["revision"] + 1) if row else 1
         db.execute(

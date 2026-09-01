@@ -180,37 +180,76 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   // 刷新被"保存中"挡下时标记延后：保存一结束就补一次刷新，AI 的写入不丢
   const pendingRefreshRef = useRef(false);
   const refreshFromServerRef = useRef<() => Promise<void>>(async () => {});
+  // 当前在途保存的 Promise（排队链接用，见 flushWorkspace）
+  const savingPromiseRef = useRef<Promise<boolean> | null>(null);
+  // 本次会话内通过 addPerson 新建的成员 id：
+  // 幽灵自恢复时这些成员即使还没落到服务端也必须保留
+  const locallyAddedIdsRef = useRef<Set<string>>(new Set());
 
-  const flushWorkspace = useCallback(async (): Promise<boolean> => {
+  const flushWorkspace = useCallback((): Promise<boolean> => {
+    const run = async (): Promise<boolean> => {
+      setSyncStatus("saving");
+      savingRef.current = true;
+      try {
+        await api.saveState(workspaceRef.current);
+        setSyncStatus("saved");
+        return true;
+      } catch (error) {
+        console.error("Unable to save workspace", error);
+        if (
+          error instanceof ApiError &&
+          error.status === 403 &&
+          error.message.includes("停用")
+        ) {
+          // 管理员刚停用了本账号：切换到离线模式（只读）
+          setAccountDisabled(true);
+        } else if (
+          error instanceof ApiError &&
+          error.status === 422 &&
+          error.message.includes("尚未注册账户")
+        ) {
+          // 本地残留幽灵成员（服务端账号已删而本地状态还留着）：
+          // 拉取服务端最新名单，剥掉本地幽灵（保留本次会话新建的成员），
+          // 状态变化会触发防抖自动重存，用户无需手动刷新页面
+          try {
+            const { state: fresh } = await api.getState();
+            if (fresh) {
+              const serverIds = new Set(fresh.people.map((p) => p.id));
+              const keep = (id: string) =>
+                serverIds.has(id) || locallyAddedIdsRef.current.has(id);
+              setPeople((prev) => prev.filter((p) => keep(p.id)));
+              setTasks((prev) => prev.filter((t) => keep(t.assigneeId)));
+              setStudentProfiles((prev) => prev.filter((s) => keep(s.personId)));
+            }
+          } catch {
+            // 恢复失败不掩盖原始错误
+          }
+        }
+        setSyncStatus("error");
+        return false;
+      } finally {
+        savingRef.current = false;
+        savingPromiseRef.current = null;
+        if (pendingRefreshRef.current) {
+          pendingRefreshRef.current = false;
+          void refreshFromServerRef.current();
+        }
+      }
+    };
     if (!authUser || !hydratedRef.current || loadError || !autoSave || accountDisabled) {
-      return false;
+      return Promise.resolve(false);
     }
-    if (savingRef.current) return false;
-    setSyncStatus("saving");
-    savingRef.current = true;
-    try {
-      await api.saveState(workspaceRef.current);
-      setSyncStatus("saved");
-      return true;
-    } catch (error) {
-      console.error("Unable to save workspace", error);
-      if (
-        error instanceof ApiError &&
-        error.status === 403 &&
-        error.message.includes("停用")
-      ) {
-        // 管理员刚停用了本账号：切换到离线模式（只读）
-        setAccountDisabled(true);
-      }
-      setSyncStatus("error");
-      return false;
-    } finally {
-      savingRef.current = false;
-      if (pendingRefreshRef.current) {
-        pendingRefreshRef.current = false;
-        void refreshFromServerRef.current();
-      }
+    const inFlight = savingPromiseRef.current;
+    if (inFlight) {
+      // 已有保存在途：排在它完成后再保存一次最新状态，而不是直接返回失败。
+      // deletePerson 等关键写路径靠本函数返回值判断成败，
+      // 旧实现在此返回 false 会让删除/创建被"网络异常"误伤而中止
+      const chained = inFlight.then((ok) => (ok ? run() : false));
+      savingPromiseRef.current = chained;
+      return chained;
     }
+    savingPromiseRef.current = run();
+    return savingPromiseRef.current;
   }, [authUser, loadError, autoSave, accountDisabled]);
 
   const flushWorkspaceRef = useRef(flushWorkspace);
@@ -517,6 +556,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
       const colors = getColorForIndex(index);
       const personId = `p${Date.now()}`;
       await api.createUser({ personId, ...account });
+      locallyAddedIdsRef.current.add(personId);
       const newPerson: Person = {
         id: personId,
         username: account.username,
