@@ -256,16 +256,13 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
             if (!open) setEditingTask(null);
           }}
           onSave={(taskId, updates) => {
-            state.updateTask(taskId, updates);
+            const ok = state.updateTask(taskId, updates);
             if ((updates.progress ?? 0) >= 100) {
               state.autoArchiveCompleted(taskId);
             }
-            setEditingTask(null);
+            return ok;
           }}
-          onDelete={(taskId) => {
-            state.deleteTask(taskId);
-            setEditingTask(null);
-          }}
+          onDelete={(taskId) => state.deleteTask(taskId)}
           onAddProgressRecord={(taskId, record) =>
             state.addProgressRecord(taskId, {
               ...record,

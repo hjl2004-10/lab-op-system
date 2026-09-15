@@ -162,6 +162,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
       void flushWorkspaceRef.current();
     }, 650);
     return () => {
@@ -256,6 +257,35 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   useEffect(() => {
     flushWorkspaceRef.current = flushWorkspace;
   }, [flushWorkspace]);
+
+  // 关键写操作（记录/回复/任务保存/删除/评分）的落库确认：
+  // 等 workspaceRef 镜像同步后立即冲刷，返回是否已写入服务器。
+  // 不靠 650ms 防抖——防抖窗口内刷新/关页会把刚提交的内容静默丢掉
+  const settleAndFlush = useCallback(async (): Promise<boolean> => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return flushWorkspaceRef.current();
+  }, []);
+
+  // 刷新/关页兜底：防抖未冲刷的修改用 keepalive 请求尽力送达
+  useEffect(() => {
+    if (!authUser || !autoSave) return;
+    const handler = () => {
+      if (!saveTimerRef.current || accountDisabled) return;
+      try {
+        void fetch("/api/state", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(workspaceRef.current),
+          keepalive: true,
+        });
+      } catch {
+        // 卸载阶段尽力而为，失败交由用户重试
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [authUser, autoSave, accountDisabled]);
 
   // -- 工作区刷新：AI 直接写库后（或窗口重新聚焦时）重拉服务端状态，
   //    避免本地旧状态自动保存覆盖掉 AI 的修改 --
@@ -400,23 +430,33 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   );
 
   const updateTask = useCallback(
-    (id: string, updates: Partial<Task>) => {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
-      );
+    async (id: string, updates: Partial<Task>): Promise<boolean> => {
+      let snapshot: Task[] = [];
+      setTasks((prev) => {
+        snapshot = prev;
+        return prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
+      });
+      const ok = await settleAndFlush();
+      if (!ok) setTasks(snapshot);
+      return ok;
     },
-    [setTasks]
+    [setTasks, settleAndFlush]
   );
 
   const deleteTask = useCallback(
-    (id: string) => {
+    async (id: string): Promise<boolean> => {
+      let snapshot: Task[] = [];
       setTasks((prev) => {
+        snapshot = prev;
         const filtered = prev.filter((t) => t.id !== id);
         // Re-order remaining tasks
         return filtered.map((t, i) => ({ ...t, order: i }));
       });
+      const ok = await settleAndFlush();
+      if (!ok) setTasks(snapshot);
+      return ok;
     },
-    [setTasks]
+    [setTasks, settleAndFlush]
   );
 
   const reorderTasks = useCallback(
@@ -442,7 +482,7 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   );
 
   const addProgressRecord = useCallback(
-    (
+    async (
       taskId: string,
       record: {
         currentProgress: string;
@@ -452,15 +492,17 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
         authorId: string;
         attachments: AttachmentMeta[];
       }
-    ) => {
+    ): Promise<boolean> => {
       const newRecord: ProgressRecord = {
         ...record,
         id: generateProgressId(),
         date: new Date().toISOString().split("T")[0],
         replies: [],
       };
-      setTasks((prev) =>
-        prev.map((t) =>
+      let snapshot: Task[] = [];
+      setTasks((prev) => {
+        snapshot = prev;
+        return prev.map((t) =>
           t.id === taskId
             ? {
                 ...t,
@@ -472,23 +514,28 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
                 },
               }
             : t
-        )
-      );
+        );
+      });
+      const ok = await settleAndFlush();
+      if (!ok) setTasks(snapshot);
+      return ok;
     },
-    [setTasks]
+    [setTasks, settleAndFlush]
   );
 
   const addProgressReply = useCallback(
-    (
+    async (
       taskId: string,
       recordId: string,
       content: string,
       authorId: string,
       authorName: string,
       attachments: AttachmentMeta[] = []
-    ) => {
-      setTasks((prev) =>
-        prev.map((t) =>
+    ): Promise<boolean> => {
+      let snapshot: Task[] = [];
+      setTasks((prev) => {
+        snapshot = prev;
+        return prev.map((t) =>
           t.id === taskId
             ? {
                 ...t,
@@ -512,10 +559,13 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
                 ),
               }
             : t
-        )
-      );
+        );
+      });
+      const ok = await settleAndFlush();
+      if (!ok) setTasks(snapshot);
+      return ok;
     },
-    [setTasks]
+    [setTasks, settleAndFlush]
   );
 
   const autoArchiveCompleted = useCallback(
@@ -532,12 +582,17 @@ export function useAppState(authUser: AuthUser | null, autoSave = true) {
   );
 
   const setTaskRating = useCallback(
-    (taskId: string, rating: number) => {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, rating } : t))
-      );
+    async (taskId: string, rating: number): Promise<boolean> => {
+      let snapshot: Task[] = [];
+      setTasks((prev) => {
+        snapshot = prev;
+        return prev.map((t) => (t.id === taskId ? { ...t, rating } : t));
+      });
+      const ok = await settleAndFlush();
+      if (!ok) setTasks(snapshot);
+      return ok;
     },
-    [setTasks]
+    [setTasks, settleAndFlush]
   );
 
   // -- Person actions --------------------------------------------

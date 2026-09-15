@@ -63,8 +63,8 @@ interface TaskEditDialogProps {
   currentUserId: string | null;
   currentUserName: string;
   onOpenChange: (open: boolean) => void;
-  onSave: (taskId: string, updates: Partial<Task>) => void;
-  onDelete: (taskId: string) => void;
+  onSave: (taskId: string, updates: Partial<Task>) => Promise<boolean> | void;
+  onDelete: (taskId: string) => Promise<boolean> | void;
   onAddProgressRecord: (
     taskId: string,
     record: {
@@ -75,7 +75,7 @@ interface TaskEditDialogProps {
       authorId: string;
       attachments: AttachmentMeta[];
     }
-  ) => void;
+  ) => Promise<boolean> | void;
   onAddProgressReply: (
     taskId: string,
     recordId: string,
@@ -83,8 +83,8 @@ interface TaskEditDialogProps {
     authorId: string,
     authorName: string,
     attachments: AttachmentMeta[]
-  ) => void;
-  onSetRating: (taskId: string, rating: number) => void;
+  ) => Promise<boolean> | void;
+  onSetRating: (taskId: string, rating: number) => Promise<boolean> | void;
 }
 
 export default function TaskEditDialog({
@@ -119,6 +119,7 @@ export default function TaskEditDialog({
   // Attachment upload state
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Star rating state (local for visual feedback)
   const [hoveredStar, setHoveredStar] = useState(0);
@@ -171,7 +172,7 @@ export default function TaskEditDialog({
     setShowProgressConfirm(false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!task) return;
     const updates: Partial<Task> = {
       progress: progressInput[0],
@@ -188,7 +189,12 @@ export default function TaskEditDialog({
     if (canTogglePrivate) {
       updates.isPrivate = form.isPrivate ?? false;
     }
-    onSave(task.id, updates);
+    const ok = await onSave(task.id, updates);
+    if (ok === false) {
+      setSaveError("保存失败：内容已保留，请检查网络后重试");
+      return;
+    }
+    setSaveError(null);
     onOpenChange(false);
   };
 
@@ -206,7 +212,7 @@ export default function TaskEditDialog({
     setUploadError(null);
     try {
       const attachments = await uploadFiles(pendingFiles);
-      onAddProgressRecord(task.id, {
+      const saved = await onAddProgressRecord(task.id, {
         currentProgress: newProgress,
         mainProblems: newProblems,
         solutions: newSolutions,
@@ -214,6 +220,10 @@ export default function TaskEditDialog({
         authorId: currentUserId || "",
         attachments,
       });
+      if (saved === false) {
+        setUploadError("记录保存失败：内容与附件已保留，请检查网络后重新提交");
+        return;
+      }
       setNewProgress("");
       setNewProblems("");
       setNewSolutions("");
@@ -230,9 +240,14 @@ export default function TaskEditDialog({
     onSetRating(task.id, rating);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!task) return;
-    onDelete(task.id);
+    const ok = await onDelete(task.id);
+    if (ok === false) {
+      setSaveError("删除失败：请检查网络后重试");
+      return;
+    }
+    setSaveError(null);
     onOpenChange(false);
   };
 
@@ -254,7 +269,7 @@ export default function TaskEditDialog({
     setUploadError(null);
     try {
       const attachments = await uploadFiles(files);
-      onAddProgressReply(
+      const saved = await onAddProgressReply(
         task.id,
         recordId,
         replyContents[recordId].trim(),
@@ -262,6 +277,10 @@ export default function TaskEditDialog({
         currentUserName,
         attachments
       );
+      if (saved === false) {
+        setUploadError("回复保存失败：内容与附件已保留，请检查网络后重新发送");
+        return;
+      }
       setReplyContents((prev) => ({ ...prev, [recordId]: "" }));
       setReplyFiles((prev) => ({ ...prev, [recordId]: [] }));
       setExpandedReplyForms((prev) => ({ ...prev, [recordId]: false }));
@@ -316,6 +335,12 @@ export default function TaskEditDialog({
             <TabsTrigger value="progress">进展与问题</TabsTrigger>
             <TabsTrigger value="rating">评分</TabsTrigger>
           </TabsList>
+
+          {saveError && (
+            <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-950/40 dark:text-red-400">
+              {saveError}
+            </p>
+          )}
 
           {/* Tab 1: Basic Info */}
           <TabsContent value="basic" className="space-y-4 mt-4">
