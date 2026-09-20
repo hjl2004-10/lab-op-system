@@ -247,7 +247,9 @@ function AuthenticatedWorkspace({ user, logout }: AuthenticatedWorkspaceProps) {
         <TaskEditDialog
           key={editingTask.id}
           open
-          task={editingTask}
+          /* task 取实时对象：提交记录/保存/回滚后抽屉内数据即时刷新，
+             否则 editingTask 是打开时的快照，要关掉重开才看到新记录 */
+          task={state.tasks.find((t) => t.id === editingTask.id) ?? editingTask}
           people={state.people}
           canAssignTasks={isManager}
           currentUserId={currentUserId}

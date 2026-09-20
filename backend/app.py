@@ -602,6 +602,10 @@ def merge_manager_state(
     # people：范围内以 incoming 为准（保护 id/role/createdBy/username/配色），缺失=删除；
     # 范围外原样保留；范围内新增的成员 createdBy/role 由服务端裁定
     incoming_by_id = {p.get("id"): p for p in incoming_people}
+    for person in incoming_people:
+        # 当前登录账户不可停用：否则之后所有保存被 403 拒绝，管理端被锁死
+        if person.get("id") == user_id and person.get("status") == "archived":
+            raise HTTPException(status_code=422, detail="不能停用当前登录的账户")
     stored_ids = {p.get("id") for p in stored_people}
     people: list[dict[str, Any]] = []
     protected = {"id", "role", "createdBy", "username", "color", "lightColor", "borderColor", "textColor"}
@@ -1172,10 +1176,17 @@ def download_attachment(
         raise HTTPException(status_code=404, detail="附件不存在或已删除")
     with database() as db:
         state_row = db.execute("SELECT payload FROM app_state WHERE id = 1").fetchone()
-    task = find_attachment_task(json.loads(state_row["payload"]), attachment_id) if state_row else None
+    payload = json.loads(state_row["payload"]) if state_row else None
+    task = find_attachment_task(payload, attachment_id) if payload else None
     if task is not None:
-        # 已挂进某条记录：按该任务的可见性判定（私有任务的附件教师不可下载）
-        if not user_can_see_task(task, user):
+        # 已挂进某条记录：除私有标记外还必须落在自己的工作区范围内，
+        # 否则已知附件 ID 即可越权下载其他教师工作区的附件
+        if user["role"] == "student":
+            visible = task.get("assigneeId") == user["personId"]
+        else:
+            scope = manager_task_scope(payload.get("people", []), user)
+            visible = task.get("assigneeId") in scope
+        if not visible or not user_can_see_task(task, user):
             raise HTTPException(status_code=404, detail="附件不存在或已删除")
     elif row["uploader"] != user["personId"]:
         # 尚未挂进任何任务（刚上传、自动保存有延迟，或所在记录已被删除）：仅上传者可访问
