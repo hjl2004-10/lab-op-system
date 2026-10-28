@@ -37,6 +37,9 @@ ATTACHMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 DIST_DIR = BASE_DIR / "dist"
 SESSION_COOKIE = "yang11_session"
 SESSION_DAYS = 7
+# 滑动续期：剩余有效期不足 N 天且用户仍活跃时，把会话和 cookie 顺延回完整 SESSION_DAYS，
+# 避免活跃用户在登录满 7 天的边界上突然 401（2026-10-27 刘梦菲保存失败事故的根因）
+SESSION_RENEW_THRESHOLD_DAYS = 3
 # 单点登录：最近 N 分钟内有活动的会话视为"在线"，在线期间拒绝其他设备登录
 SESSION_ONLINE_MINUTES = int(os.getenv("GANTT_ONLINE_MINUTES", "30"))
 PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,128}$")
@@ -737,25 +740,40 @@ def sync_users(db: sqlite3.Connection, people: list[dict[str, Any]]) -> None:
 _session_touch_cache: dict[str, float] = {}
 
 
-def touch_session(token_hash: str) -> None:
-    """刷新会话活跃时间（单点登录的"在线"依据；限流：每会话每 60 秒最多写一次库）"""
+def touch_session(token_hash: str) -> bool:
+    """刷新会话活跃时间（单点登录的"在线"依据）；限流：每会话每 60 秒最多写一次库。
+    滑动续期：剩余有效期不足阈值时顺延 expires_at，活跃用户不会撞上硬过期边界。
+    返回本次是否续期（调用方据此同步刷新 cookie 的 max_age）。"""
     moment = time.monotonic()
     if moment - _session_touch_cache.get(token_hash, 0.0) < 60:
-        return
+        return False
     if len(_session_touch_cache) > 10000:
         _session_touch_cache.clear()
     _session_touch_cache[token_hash] = moment
     try:
         with database() as db:
+            row = db.execute(
+                "SELECT expires_at FROM sessions WHERE token_hash = ?", (token_hash,)
+            ).fetchone()
+            if not row:
+                return False
+            now = datetime.now(UTC)
+            new_expires = row["expires_at"]
+            renewed = False
+            if datetime.fromisoformat(new_expires) - now < timedelta(days=SESSION_RENEW_THRESHOLD_DAYS):
+                new_expires = (now + timedelta(days=SESSION_DAYS)).isoformat()
+                renewed = True
             db.execute(
-                "UPDATE sessions SET last_seen = ? WHERE token_hash = ?",
-                (now_iso(), token_hash),
+                "UPDATE sessions SET last_seen = ?, expires_at = ? WHERE token_hash = ?",
+                (now_iso(), new_expires, token_hash),
             )
+            return renewed
     except sqlite3.Error:
-        pass  # 活跃时间刷新失败不影响本次请求
+        return False  # 活跃时间刷新失败不影响本次请求
 
 
 async def current_user(
+    response: Response,
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> dict[str, Any]:
     if not session_token:
@@ -772,7 +790,18 @@ async def current_user(
         ).fetchone()
     if not row:
         raise HTTPException(status_code=401, detail="登录已过期或已在其他设备登录，请重新登录")
-    touch_session(token_hash)
+    if touch_session(token_hash):
+        # 服务端 expires_at 已顺延，cookie 的 max_age 必须同步顺延，
+        # 否则浏览器仍会在原 7 天边界直接删掉 cookie
+        response.set_cookie(
+            SESSION_COOKIE,
+            session_token,
+            max_age=SESSION_DAYS * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            secure=os.getenv("GANTT_SECURE_COOKIE", "0") == "1",
+            path="/",
+        )
     return public_user(row)
 
 
